@@ -9,6 +9,7 @@ import { Calendar, Plus, AlertCircle, ChevronRight, Zap, RefreshCw, ChevronDown 
 
 export default function SprintsPage() {
   const [sprints, setSprints] = useState<any[]>([])
+  const [jiraBaseUrl, setJiraBaseUrl] = useState('')
   const [loading, setLoading] = useState(true)
   const [showNewSprintForm, setShowNewSprintForm] = useState(false)
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all')
@@ -78,6 +79,7 @@ export default function SprintsPage() {
       if (response.ok) {
         const data = await response.json()
         setSprints(data.sprints)
+        setJiraBaseUrl(data.jiraBaseUrl || '')
       }
     } catch (error) {
       console.error('Error fetching sprints:', error)
@@ -439,7 +441,14 @@ export default function SprintsPage() {
                               {sprint.tickets.map((ticket: any) => (
                                 <div key={ticket.id} className="flex items-center justify-between text-sm">
                                   <div className="text-slate-200">
-                                    <span className="font-mono text-slate-400 mr-2">{ticket.jiraId}</span>
+                                    <a
+                                      href={getJiraTicketUrl(ticket.jiraId)}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="font-mono text-blue-300 hover:text-blue-200 mr-2"
+                                    >
+                                      {ticket.jiraId}
+                                    </a>
                                     {ticket.summary}
                                   </div>
                                   <div className="flex items-center gap-3 text-xs text-slate-400">
@@ -478,3 +487,7 @@ export default function SprintsPage() {
     </main>
   )
 }
+  const getJiraTicketUrl = (ticketKey: string) => {
+    if (!jiraBaseUrl || !ticketKey) return ''
+    return `${jiraBaseUrl.replace(/\/$/, '')}/browse/${ticketKey}`
+  }
