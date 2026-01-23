@@ -53,6 +53,15 @@ export default function SprintsPage() {
     return Number.isInteger(value) ? value.toString() : value.toFixed(1)
   }
 
+  const getDaysRemaining = (endDate: string | Date) => {
+    const end = new Date(endDate)
+    if (Number.isNaN(end.getTime())) return '--'
+    const now = new Date()
+    const diffMs = end.getTime() - now.getTime()
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+    return diffDays < 0 ? '0' : diffDays.toString()
+  }
+
   useEffect(() => {
     fetchSprints()
   }, [])
@@ -372,7 +381,7 @@ export default function SprintsPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-700/30">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4 pt-4 border-t border-slate-700/30">
                         <div>
                           <div className="text-slate-500 text-xs mb-1">Tickets</div>
                           <div className="text-xl font-bold text-white">{sprint.tickets?.length || 0}</div>
@@ -401,6 +410,12 @@ export default function SprintsPage() {
                           <div className="text-slate-500 text-xs mb-1">Story Points</div>
                           <div className="text-xl font-bold text-white">
                             {formatStoryPoints(sprint.storyPointsTotal)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-slate-500 text-xs mb-1">Days Left</div>
+                          <div className="text-xl font-bold text-white">
+                            {getDaysRemaining(sprint.endDate)}
                           </div>
                         </div>
                       </div>
