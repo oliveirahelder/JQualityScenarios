@@ -3,6 +3,7 @@ import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
 import { syncAllSprints, syncActiveSprints, syncRecentClosedSprints } from '@/lib/sprint-sync'
 import { prisma } from '@/lib/prisma'
 import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
+import type { JiraCredentials } from '@/lib/jira-config'
 
 /**
  * POST /api/admin/sprints/sync
@@ -40,20 +41,25 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { type = 'all' } = await req.json()
+    const { type = 'all', boardUrl, boardIds } = await req.json()
+
+    const overrideBoardIds = parseBoardIds(boardIds, boardUrl)
+    const credentials: JiraCredentials = overrideBoardIds
+      ? { ...jiraCredentials, boardIds: overrideBoardIds }
+      : jiraCredentials
 
     let result
 
     switch (type) {
       case 'active':
-        result = await syncActiveSprints(jiraCredentials)
+        result = await syncActiveSprints(credentials)
         break
       case 'closed':
-        result = await syncRecentClosedSprints(jiraCredentials)
+        result = await syncRecentClosedSprints(credentials)
         break
       case 'all':
       default:
-        result = await syncAllSprints(jiraCredentials)
+        result = await syncAllSprints(credentials)
     }
 
     return NextResponse.json({
@@ -67,6 +73,35 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+function parseBoardIds(
+  rawIds: string | undefined,
+  boardUrl: string | undefined
+): number[] | null {
+  const extracted = boardUrl ? extractBoardIdFromUrl(boardUrl) : null
+  if (extracted) return [extracted]
+  if (!rawIds) return null
+  const parsed = rawIds
+    .split(',')
+    .map((value) => parseInt(value.trim(), 10))
+    .filter((value) => !Number.isNaN(value))
+  return parsed.length ? parsed : null
+}
+
+function extractBoardIdFromUrl(value: string): number | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    const rapidView = url.searchParams.get('rapidView')
+    if (rapidView) return parseInt(rapidView, 10)
+    const boardMatch = url.pathname.match(/\/boards?\/(\d+)/i)
+    if (boardMatch?.[1]) return parseInt(boardMatch[1], 10)
+  } catch {
+    const rapidMatch = value.match(/rapidView=(\d+)/i)
+    if (rapidMatch?.[1]) return parseInt(rapidMatch[1], 10)
+  }
+  return null
 }
 
 /**

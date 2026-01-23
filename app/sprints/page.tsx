@@ -16,6 +16,8 @@ export default function SprintsPage() {
   const [syncError, setSyncError] = useState('')
   const [syncSuccess, setSyncSuccess] = useState('')
   const [expandedSprintId, setExpandedSprintId] = useState<string | null>(null)
+  const [syncBoardUrl, setSyncBoardUrl] = useState('')
+  const [syncBoardIds, setSyncBoardIds] = useState('')
   const [formData, setFormData] = useState({
     jiraId: '',
     name: '',
@@ -78,6 +80,10 @@ export default function SprintsPage() {
     setSyncSuccess('')
 
     try {
+      if (!syncBoardUrl.trim() && !syncBoardIds.trim()) {
+        throw new Error('Provide a Board URL or Board IDs to sync.')
+      }
+
       const token = localStorage.getItem('token')
       const response = await fetch('/api/admin/sprints/sync', {
         method: 'POST',
@@ -85,7 +91,11 @@ export default function SprintsPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ type: 'active' }),
+        body: JSON.stringify({
+          type: 'active',
+          boardUrl: syncBoardUrl.trim() || undefined,
+          boardIds: syncBoardIds.trim() || undefined,
+        }),
       })
 
       const data = await response.json()
@@ -94,7 +104,12 @@ export default function SprintsPage() {
       }
 
       await fetchSprints()
-      setSyncSuccess('Sprints synced from Jira.')
+      const count = data?.result?.sprintCount ?? data?.result?.activeSprints?.sprintCount
+      setSyncSuccess(
+        typeof count === 'number'
+          ? `Sprints synced from Jira. Active sprints: ${count}.`
+          : 'Sprints synced from Jira.'
+      )
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : 'Failed to sync sprints')
     } finally {
@@ -139,6 +154,22 @@ export default function SprintsPage() {
               New Sprint
             </Button>
           </div>
+        </div>
+
+        <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Input
+            placeholder="Board URL (RapidBoard.jspa?rapidView=123)"
+            value={syncBoardUrl}
+            onChange={(e) => setSyncBoardUrl(e.target.value)}
+            className="bg-slate-800/50 border-slate-700"
+          />
+          <Input
+            placeholder="Board IDs (optional if URL provided)"
+            value={syncBoardIds}
+            onChange={(e) => setSyncBoardIds(e.target.value)}
+            disabled={Boolean(syncBoardUrl.trim())}
+            className="bg-slate-800/50 border-slate-700 disabled:opacity-50"
+          />
         </div>
 
         {(syncError || syncSuccess) && (

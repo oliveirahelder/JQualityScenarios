@@ -130,6 +130,27 @@ export async function getSprintsFromBoard(
   }
 }
 
+export async function getActiveSprintsFromBoard(
+  boardId: number,
+  credentials?: JiraCredentials
+): Promise<JiraSprintEvent[]> {
+  try {
+    const response = await getAgileClient(credentials).get(`/board/${boardId}/sprint`, {
+      params: {
+        maxResults: 50,
+        state: 'active',
+      },
+    })
+
+    return response.data.values || []
+  } catch (error) {
+    const axiosError = error as AxiosError
+    const errorMessage = axiosError.response?.data || axiosError.message || 'Unknown error'
+    console.error(`Error fetching active sprints from board ${boardId}:`, errorMessage)
+    throw new Error(`Failed to fetch active Jira sprints for board ${boardId}: ${errorMessage}`)
+  }
+}
+
 /**
  * Fetch issues in a specific sprint
  */
@@ -185,8 +206,7 @@ export async function getActiveSprints(
     const allSprints: JiraSprintWithIssues[] = []
 
     for (const boardId of boardIds) {
-      const sprints = await getSprintsFromBoard(boardId, credentials)
-      const activeSprints = sprints.filter((s) => s.state === 'ACTIVE')
+      const activeSprints = await getActiveSprintsFromBoard(boardId, credentials)
 
       for (const sprint of activeSprints) {
         const issues = await getSprintIssues(sprint.id, credentials)
@@ -221,7 +241,7 @@ export async function getRecentClosedSprints(
       const historyStart = new Date(now.getTime() - sprintHistoryDays * 24 * 60 * 60 * 1000)
 
       const recentlyClosed = sprints.filter((s) => {
-        if (s.state !== 'CLOSED' || !s.endDate) return false
+        if ((s.state || '').toUpperCase() !== 'CLOSED' || !s.endDate) return false
         const endDate = new Date(s.endDate)
         return endDate >= historyStart && endDate <= now
       })

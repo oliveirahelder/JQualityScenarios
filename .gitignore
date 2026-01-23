@@ -39,3 +39,5 @@ yarn-error.log*
 
 # Cache
 .eslintcache
+# Local Prisma dev database
+prisma/prisma/dev.db
