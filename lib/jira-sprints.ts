@@ -133,7 +133,12 @@ function matchStatus(value: string, targets: string[]) {
 
 function countQaBounceBacks(changelog: any): number {
   const histories = changelog?.histories || []
-  const qaStatuses = ['in qa']
+  const qaStatuses = [
+    'in qa',
+    'awaiting approval',
+    'awaiting for approval',
+    'waiting for approval',
+  ]
   const devStatuses = ['in progress', 'in development', 'in refinement']
   let count = 0
 
