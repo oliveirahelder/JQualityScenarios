@@ -1,0 +1,225 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User model for authentication and role-based access
+model User {
+  id        String     @id @default(cuid())
+  email     String     @unique
+  password  String
+  name      String
+  role      String     @default("QA")
+  isActive  Boolean    @default(true)
+  jiraBaseUrl String?
+  jiraUser String?
+  jiraApiToken String?
+  jiraAuthType String?
+  jiraDeployment String?
+  jiraBoardIds String?
+  jiraSprintFieldId String?
+  jiraRequestTimeout Int?
+  jiraAccessToken String?
+  jiraRefreshToken String?
+  jiraTokenExpiresAt DateTime?
+  jiraCloudId String?
+  jiraSiteUrl String?
+  jiraConnectionStatus String?
+  jiraConnectionCheckedAt DateTime?
+  confluenceBaseUrl String?
+  confluenceUser String?
+  confluenceApiToken String?
+  confluenceAuthType String?
+  confluenceDeployment String?
+  confluenceConnectionStatus String?
+  confluenceConnectionCheckedAt DateTime?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // Relations
+  scenarios DocumentationDraft[]
+  testScenarios TestScenario[]
+
+  @@map("users")
+}
+
+// Sprint model - tracks Sprint creation and dates
+model Sprint {
+  id        String     @id @default(cuid())
+  jiraId    String     @unique
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  status    String     @default("ACTIVE")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // Relations
+  tickets   Ticket[]
+  documentationDrafts DocumentationDraft[]
+
+  @@map("sprints")
+}
+
+// Ticket model - represents individual Jira tickets
+model Ticket {
+  id        String     @id @default(cuid())
+  jiraId    String     @unique
+  sprintId  String
+  sprint    Sprint     @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+  
+  summary   String
+  description String?
+  status    String     @default("TODO")
+  assignee  String?
+  priority  String?
+  
+  grossTime Int? // Calculated from Sprint startDate in calendar days
+  
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // Relations
+  devInsights DevInsight[]
+  testScenarios TestScenario[]
+  documentationDraft DocumentationDraft?
+
+  @@map("tickets")
+  @@index([sprintId])
+}
+
+// DevInsight model - stores developer PR notes and AI-generated code analysis
+model DevInsight {
+  id        String     @id @default(cuid())
+  ticketId  String
+  ticket    Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  prUrl     String?
+  prTitle   String?
+  prNotes   String? // Developer's description of changes
+  prDiff    String? // Full code diff from Git
+  
+  // AI-generated analysis
+  aiAnalysis String? // Analysis of code impact based on diff
+  detectedImpactAreas String? // JSON array of affected functional areas
+  
+  analyzedAt DateTime?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("dev_insights")
+  @@index([ticketId])
+}
+
+// TestScenario model - BDD/Gherkin test scenarios with traceability
+model TestScenario {
+  id        String     @id @default(cuid())
+  ticketId  String
+  ticket    Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+  
+  title     String
+  description String?
+  
+  // Gherkin format
+  given     String? // Preconditions
+  when      String? // Actions
+  then      String? // Expected results
+  
+  // Evidence and execution
+  testEnvironment String? // URL or environment name (e.g., Staging)
+  executionStatus String     @default("DRAFT")
+  evidence  String? // JSON with links to screenshots, logs, etc.
+  
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("test_scenarios")
+  @@index([ticketId])
+  @@index([userId])
+}
+
+// DocumentationDraft model - AI-generated documentation awaiting QA review
+model DocumentationDraft {
+  id        String     @id @default(cuid())
+  sprintId  String
+  sprint    Sprint     @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+  
+  ticketId  String     @unique
+  ticket    Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+  
+  // Draft content
+  title     String
+  content   String // Markdown or HTML
+  
+  // Requirements & context
+  requirements String? // From Jira ticket
+  technicalNotes String? // From DevInsight
+  testResults String? // From TestScenarios
+  
+  // Review & Publishing
+  status    String     @default("DRAFT")
+  reviewedBy String? // User ID who reviewed
+  reviewedAt DateTime?
+  publishedAt DateTime?
+  
+  confluencePageId String?
+  confluenceUrl String?
+  
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("documentation_drafts")
+  @@index([sprintId])
+  @@index([ticketId])
+  @@index([userId])
+}
+
+// Deployment model - tracks CI/CD deployments to environments
+model Deployment {
+  id        String     @id @default(cuid())
+  sprintId  String?
+  buildNumber String
+  environment String     @default("STAGING")
+  status    String     @default("PENDING")
+  
+  startedAt DateTime?
+  completedAt DateTime?
+  
+  gitCommitSha String?
+  cicdJobUrl String?
+  
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("deployments")
+  @@index([sprintId])
+}
+
+// HistoricalSearch model - caches search results for performance
+model HistoricalSearchCache {
+  id        String     @id @default(cuid())
+  query     String
+  userId    String?
+  
+  jiraResults String? // JSON array of matching Jira tickets
+  confluenceResults String? // JSON array of matching Confluence pages
+  
+  expiresAt DateTime
+  createdAt DateTime   @default(now())
+
+  @@map("historical_search_cache")
+  @@unique([userId, query])
+}

@@ -1,124 +1,111 @@
-# QA Scenario Generator
+# QABOT - Centralized Intelligence Platform
 
-Uma aplicação web para gerar cenários de QA automaticamente a partir de tickets do Jira e documentação do Confluence, usando IA generativa.
+A sophisticated platform that connects Jira, GitHub, and Confluence to automate test scenario generation, audit technical impacts in real-time, and publish validated "As-Built" documentation with full traceability.
 
----
+## 🎯 Project Vision
 
-## Funcionalidades
-- Busca detalhes de tickets diretamente da API do Jira (via número do ticket)
-- Permite colar ou fazer upload do XML exportado do Jira
-- Integração com OpenAI para geração de cenários de teste inteligentes
-- Suporte a documentação adicional (Confluence)
-- Interface simples e rápida para equipas de QA
+QABOT anticipates test scenarios from Sprint creation, analyzes developer code changes, executes functional tests only after Staging deployment, and maintains human-reviewed documentation—ensuring 100% traceability from Sprint creation to final publication.
 
----
+## 🏗️ Architecture
 
-## Instalação e Setup
+- **Frontend**: Next.js 14 (App Router) + Tailwind CSS + ShadcnUI
+- **Backend**: Next.js API Routes (Node.js)
+- **Database**: PostgreSQL with Prisma ORM
+- **AI Engine**: Gemini Pro API (semantic analysis) + OpenAI (scenario generation)
+- **Integrations**: Jira API, GitHub API, Confluence API, CI/CD Webhooks
 
-### 1. Backend
-```sh
-cd server
+## 📋 Data Model
+
+- **Sprint**: Tracks Sprint creation with start/end dates and associated tickets
+- **Ticket**: Jira ticket representation with Gross Time calculation
+- **DevInsight**: Developer PR notes + AI-analyzed code diffs
+- **TestScenario**: BDD/Gherkin scenarios with traceability
+- **DocumentationDraft**: AI-generated content awaiting QA review
+- **Deployment**: CI/CD deployment tracking for Staging/Production
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Node.js 18+
+- PostgreSQL 14+
+- API keys: Jira, GitHub, Confluence, OpenAI, Gemini Pro
+
+### Installation
+
+```bash
+# Install dependencies
 npm install
+
+# Setup environment
+cp .env.example .env.local
+# Edit .env.local with your credentials
+
+# Setup database
+npx prisma migrate dev --name init
+
+# Start development server
+npm run dev
 ```
 
-#### Configuração do .env
-Crie o arquivo `.env` dentro da pasta `server` com:
-```
-JIRA_BASE_URL=https://seusite.atlassian.net
-JIRA_USER=seu-email@empresa.com
-JIRA_TOKEN=seu_token_api
-OPENAI_API_KEY=sua-chave-openai
-```
+Visit `http://localhost:3000` to access the platform.
 
-### 2. Frontend
-```sh
-cd client
-npm install
-```
+## 📚 API Routes (Phase 1)
 
-### 3. Rodando
-- Inicie o backend:
-  ```sh
-  cd server
-  npm start
-  ```
-- Inicie o frontend:
-  ```sh
-  cd client
-  npm start
-  ```
-- Acesse [http://localhost:3000](http://localhost:3000)
+- `POST /api/auth/login` - User authentication
+- `POST /api/auth/register` - User registration
+- `POST /api/scenarios/generate` - Generate test scenarios from Jira
+- `GET /api/scenarios` - Retrieve saved scenarios
+- `POST /api/scenarios/save` - Save generated scenarios
 
----
+## 🛣️ Development Roadmap
 
-## Como usar
+### Phase 1: Foundation & Database Migration ✅ (In Progress)
+- [x] Next.js 14 setup with Tailwind + ShadcnUI
+- [x] Prisma ORM with PostgreSQL schema
+- [x] Authentication (JWT + Role-based access)
+- [x] Scenario generation API migration
+- [ ] Frontend dashboard rebuild
 
-### 1. Buscar ticket Jira automaticamente
-- Digite o número do ticket no campo "Jira Ticket ID" (ex: PROJ-123)
-- Clique em "Generate QA Scenarios"
-- Os detalhes do ticket e os cenários gerados pela IA aparecerão na tela
+### Phase 2: Sprint & History Engine (3-4 weeks)
+- Jira Sprint listener (webhook/polling)
+- Semantic search with Gemini Pro
+- Historical ticket search + Confluence page reading
+- DevInsight entity for PR analysis
 
-### 2. Colar conteúdo XML do Jira
-- Cole o conteúdo do XML exportado do Jira no campo apropriado
-- Clique em "Generate QA Scenarios"
-- Os detalhes do ticket (extraídos do XML) e os cenários gerados pela IA aparecerão na tela
+### Phase 3: Deploy Trigger & QA Review Hub (3-4 weeks)
+- CI/CD webhook integration
+- Staging deployment confirmation logic
+- QA Hub dashboard with test evidence attachment
+- Documentation draft review UI
+- Confluence publishing workflow
 
-### 3. Upload de ficheiro XML do Jira
-- Faça upload do arquivo XML exportado do Jira
-- Clique em "Generate QA Scenarios"
-- O fluxo é o mesmo acima
+### Post-Phase 3: Optimization
+- Automated test script generation (Cypress/Playwright)
+- Gross Lead Time reporting & traceability dashboards
+- Multi-org/multi-repo support
 
-### 4. Upload e seleção de documentação adicional (PDF, Markdown, TXT, HTML)
-- Faça upload de um ou mais arquivos de documentação (exportados do Confluence, PDFs, Markdown, TXT, HTML)
-- Os arquivos são indexados localmente e ficam disponíveis para seleção
-- Marque quais documentos devem ser usados ao gerar os cenários
-- O conteúdo dos documentos selecionados será incluído no contexto enviado para a IA
+## 🔐 Authentication & Authorization
 
-### 5. Adicionar detalhes manuais do Confluence
-- Preencha o campo de documentação (opcional)
-- A IA irá considerar esse conteúdo ao gerar os cenários
+Role-based access control (RBAC):
+- **QA**: Create/review/publish documentation, execute tests
+- **Developer**: Read-only access to tickets and insights
+- **DevOps**: Manage deployments and webhooks
+- **Admin**: Full system access
 
----
+## 🔧 Environment Variables
 
-## Fluxos suportados
-- **TicketId preenchido:** busca detalhes do Jira via API
-- **XML colado:** extrai detalhes do XML colado (prioridade máxima)
-- **Upload de XML:** extrai detalhes do arquivo enviado
-- **Upload de documentação:** indexa e permite seleção de múltiplos arquivos (PDF, Markdown, TXT, HTML)
-- **Confluence:** sempre pode ser usado junto
+See `.env.example` for all required configuration variables.
 
----
+## 📖 Documentation
 
-## Exemplo de uso
+- [Architecture Design](./docs/architecture.md) (Coming soon)
+- [API Reference](./docs/api.md) (Coming soon)
+- [Database Schema](./docs/schema.md) (Coming soon)
 
-1. Cole um XML exportado do Jira:
-```
-<rss><channel><item>
-  <key>PROJ-123</key>
-  <summary>Login não funciona</summary>
-  <description>Usuário não consegue logar...</description>
-  <status>To Do</status>
-  <assignee>Maria QA</assignee>
-</item></channel></rss>
-```
+## 🤝 Contributing
 
-2. Clique em "Generate QA Scenarios" e veja os cenários sugeridos pela IA!
+This is a focused, enterprise project. For significant changes, please discuss with the core team first.
 
----
+## 📝 License
 
-## Observações técnicas
-- A IA utilizada é o modelo GPT-3.5-turbo da OpenAI
-- O backend aceita tanto JSON (para xmlText, ticketId) quanto multipart/form-data (para upload de ficheiro)
-- O parser XML é compatível com exportações padrão do Jira
-- O sistema pode ser facilmente adaptado para outros formatos ou integrações
-
----
-
-## Segurança
-- Nunca compartilhe seu token da OpenAI ou Jira publicamente
-- O arquivo `.env` já está gitignored por padrão
-
----
-
-## Dúvidas ou melhorias?
-Abra um issue ou entre em contato com o desenvolvedor!
+Internal use only.
