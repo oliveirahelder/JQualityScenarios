@@ -63,6 +63,11 @@ export default function SprintsPage() {
     return diffDays < 0 ? '0' : diffDays.toString()
   }
 
+  const getJiraTicketUrl = (ticketKey: string) => {
+    if (!jiraBaseUrl || !ticketKey) return ''
+    return `${jiraBaseUrl.replace(/\/$/, '')}/browse/${ticketKey}`
+  }
+
   useEffect(() => {
     fetchSprints()
   }, [])
@@ -441,14 +446,20 @@ export default function SprintsPage() {
                               {sprint.tickets.map((ticket: any) => (
                                 <div key={ticket.id} className="flex items-center justify-between text-sm">
                                   <div className="text-slate-200">
-                                    <a
-                                      href={getJiraTicketUrl(ticket.jiraId)}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="font-mono text-blue-300 hover:text-blue-200 mr-2"
-                                    >
-                                      {ticket.jiraId}
-                                    </a>
+                                    {jiraBaseUrl ? (
+                                      <a
+                                        href={getJiraTicketUrl(ticket.jiraId)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="font-mono text-blue-300 hover:text-blue-200 mr-2"
+                                      >
+                                        {ticket.jiraId}
+                                      </a>
+                                    ) : (
+                                      <span className="font-mono text-slate-400 mr-2">
+                                        {ticket.jiraId}
+                                      </span>
+                                    )}
                                     {ticket.summary}
                                   </div>
                                   <div className="flex items-center gap-3 text-xs text-slate-400">
@@ -487,7 +498,3 @@ export default function SprintsPage() {
     </main>
   )
 }
-  const getJiraTicketUrl = (ticketKey: string) => {
-    if (!jiraBaseUrl || !ticketKey) return ''
-    return `${jiraBaseUrl.replace(/\/$/, '')}/browse/${ticketKey}`
-  }

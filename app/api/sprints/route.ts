@@ -19,9 +19,6 @@ export async function GET(req: NextRequest) {
       where: { id: payload.userId },
       select: { jiraBaseUrl: true },
     })
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
-    }
 
     const sprints = await prisma.sprint.findMany({
       include: {
@@ -31,7 +28,7 @@ export async function GET(req: NextRequest) {
       orderBy: { startDate: 'desc' },
     })
 
-    return NextResponse.json({ sprints, jiraBaseUrl: user.jiraBaseUrl })
+    return NextResponse.json({ sprints, jiraBaseUrl: user?.jiraBaseUrl || '' })
   } catch (error) {
     console.error('Error fetching sprints:', error)
     return NextResponse.json(
