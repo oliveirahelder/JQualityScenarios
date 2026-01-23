@@ -58,6 +58,11 @@ model Sprint {
   startDate DateTime
   endDate   DateTime
   status    String     @default("ACTIVE")
+  totalTickets Int     @default(0)
+  closedTickets Int    @default(0)
+  successPercent Float @default(0)
+  storyPointsTotal Float @default(0)
+  qaBounceBackCount Int @default(0)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -80,6 +85,9 @@ model Ticket {
   status    String     @default("TODO")
   assignee  String?
   priority  String?
+  storyPoints Float?
+  qaBounceBackCount Int @default(0)
+  prCount   Int       @default(0)
   
   grossTime Int? // Calculated from Sprint startDate in calendar days
   

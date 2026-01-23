@@ -55,6 +55,14 @@ export default function Dashboard() {
   })
   const jiraTimeoutMs = 30000
 
+  const [metricsLoading, setMetricsLoading] = useState(true)
+  const [metricValues, setMetricValues] = useState({
+    activeSprints: null as number | null,
+    todoTickets: null as number | null,
+    inProgressTickets: null as number | null,
+    doneTickets: null as number | null,
+  })
+
   const [confluenceLoading, setConfluenceLoading] = useState(true)
   const [confluenceSaving, setConfluenceSaving] = useState(false)
   const [confluenceTesting, setConfluenceTesting] = useState(false)
@@ -125,6 +133,33 @@ export default function Dashboard() {
     }
 
     loadSettings()
+  }, [])
+
+  useEffect(() => {
+    const loadMetrics = async () => {
+      try {
+        const authToken = localStorage.getItem('token')
+        const response = await fetch('/api/metrics/jira', {
+          headers: { Authorization: `Bearer ${authToken}` },
+        })
+        if (!response.ok) {
+          return
+        }
+        const data = await response.json()
+        setMetricValues({
+          activeSprints: data.activeSprintCount ?? null,
+          todoTickets: data.ticketStatusCounts?.todo ?? null,
+          inProgressTickets: data.ticketStatusCounts?.in_progress ?? null,
+          doneTickets: data.ticketStatusCounts?.done ?? null,
+        })
+      } catch {
+        // Keep defaults on error
+      } finally {
+        setMetricsLoading(false)
+      }
+    }
+
+    loadMetrics()
   }, [])
 
   const validateJiraInputs = () => {
@@ -338,35 +373,35 @@ export default function Dashboard() {
   const metrics = [
     {
       title: 'Active Sprints',
-      value: '0',
-      subtitle: 'Ready to track',
+      value: metricValues.activeSprints ?? '--',
+      subtitle: 'From Jira',
       icon: BarChart3,
       color: 'from-blue-600 to-blue-500',
-      trend: '+0%',
+      trend: metricsLoading ? '...' : '',
     },
     {
-      title: 'Pending Scenarios',
-      value: '0',
-      subtitle: 'Awaiting generation',
+      title: 'Tickets - To Do',
+      value: metricValues.todoTickets ?? '--',
+      subtitle: 'Active sprints',
       icon: Zap,
       color: 'from-purple-600 to-purple-500',
-      trend: '+0%',
+      trend: metricsLoading ? '...' : '',
     },
     {
-      title: 'Draft Docs',
-      value: '0',
-      subtitle: 'Awaiting review',
+      title: 'Tickets - In Progress',
+      value: metricValues.inProgressTickets ?? '--',
+      subtitle: 'Active sprints',
       icon: BookOpen,
       color: 'from-orange-600 to-orange-500',
-      trend: '+0%',
+      trend: metricsLoading ? '...' : '',
     },
     {
-      title: 'Published Docs',
-      value: '0',
-      subtitle: 'To Confluence',
+      title: 'Tickets - Done',
+      value: metricValues.doneTickets ?? '--',
+      subtitle: 'Active sprints',
       icon: CheckCircle2,
       color: 'from-green-600 to-green-500',
-      trend: '+0%',
+      trend: metricsLoading ? '...' : '',
     },
   ]
 

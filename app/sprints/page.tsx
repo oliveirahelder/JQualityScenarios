@@ -25,6 +25,34 @@ export default function SprintsPage() {
     endDate: '',
   })
 
+  const getSprintProgress = (tickets: any[] | undefined) => {
+    const total = tickets?.length || 0
+    if (!total) return { closed: 0, total: 0 }
+    const closed = tickets.filter((ticket) => {
+      const status = (ticket?.status || '').toLowerCase()
+      return status.includes('done') || status.includes('closed') || status.includes('resolved')
+    }).length
+    return { closed, total }
+  }
+
+  const getSprintSuccess = (sprint: any) => {
+    const total =
+      typeof sprint?.totalTickets === 'number'
+        ? sprint.totalTickets
+        : sprint?.tickets?.length || 0
+    const closed =
+      typeof sprint?.closedTickets === 'number'
+        ? sprint.closedTickets
+        : getSprintProgress(sprint?.tickets).closed
+    const percent = total ? Math.round((closed / total) * 1000) / 10 : 0
+    return { total, closed, percent }
+  }
+
+  const formatStoryPoints = (value: number | null | undefined) => {
+    if (value == null) return '--'
+    return Number.isInteger(value) ? value.toString() : value.toFixed(1)
+  }
+
   useEffect(() => {
     fetchSprints()
   }, [])
@@ -344,7 +372,7 @@ export default function SprintsPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-4 mt-4 pt-4 border-t border-slate-700/30">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-700/30">
                         <div>
                           <div className="text-slate-500 text-xs mb-1">Tickets</div>
                           <div className="text-xl font-bold text-white">{sprint.tickets?.length || 0}</div>
@@ -354,8 +382,26 @@ export default function SprintsPage() {
                           <div className="text-xl font-bold text-white">{sprint.documentationDrafts?.length || 0}</div>
                         </div>
                         <div>
-                          <div className="text-slate-500 text-xs mb-1">Progress</div>
-                          <div className="text-xl font-bold text-blue-400">--</div>
+                          <div className="text-slate-500 text-xs mb-1">Success</div>
+                          {(() => {
+                            const { closed, total, percent } = getSprintSuccess(sprint)
+                            return (
+                              <>
+                                <div className="text-xl font-bold text-blue-400">
+                                  {total ? `${percent}%` : '--'}
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                  {total ? `${closed} / ${total}` : '--'}
+                                </div>
+                              </>
+                            )
+                          })()}
+                        </div>
+                        <div>
+                          <div className="text-slate-500 text-xs mb-1">Story Points</div>
+                          <div className="text-xl font-bold text-white">
+                            {formatStoryPoints(sprint.storyPointsTotal)}
+                          </div>
                         </div>
                       </div>
 
@@ -381,7 +427,11 @@ export default function SprintsPage() {
                                     <span className="font-mono text-slate-400 mr-2">{ticket.jiraId}</span>
                                     {ticket.summary}
                                   </div>
-                                  <span className="text-xs text-slate-400">{ticket.status}</span>
+                                  <div className="flex items-center gap-3 text-xs text-slate-400">
+                                    <span>{ticket.status}</span>
+                                    <span>PRs: {ticket.prCount ?? 0}</span>
+                                    <span>Bounce: {ticket.qaBounceBackCount ?? 0}</span>
+                                  </div>
                                 </div>
                               ))}
                             </div>

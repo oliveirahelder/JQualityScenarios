@@ -4,6 +4,8 @@ import {
   getRecentClosedSprints,
   normalizeSprint,
   normalizeIssue,
+  getIssueChangelogMetrics,
+  resolveStoryPointsFieldId,
 } from '@/lib/jira-sprints'
 import type { JiraCredentials } from '@/lib/jira-config'
 
@@ -16,6 +18,7 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
     console.log('[Sprint Sync] Starting active sprints sync...')
 
     const jiraSprints = await getActiveSprints(credentials)
+    const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
 
     for (const jiraSprint of jiraSprints) {
       const normalized = normalizeSprint(jiraSprint)
@@ -40,14 +43,44 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
 
       console.log(`[Sprint Sync] Sprint synced: ${normalized.name}`)
 
+      let totalTickets = 0
+      let closedTickets = 0
+      let storyPointsTotal = 0
+      let qaBounceBackCount = 0
+
       // Sync issues in this sprint
       if (jiraSprint.issues) {
         for (const jiraIssue of jiraSprint.issues) {
           const issueNormalized = normalizeIssue(jiraIssue)
+          const { storyPoints, qaBounceBackCount: ticketBounceBacks } =
+            await getIssueChangelogMetrics(
+              jiraIssue.key,
+              credentials,
+              storyPointsFieldId
+            )
+          const isClosed = isClosedStatus(issueNormalized.status)
+          totalTickets += 1
+          if (isClosed) closedTickets += 1
+          if (typeof storyPoints === 'number' && !Number.isNaN(storyPoints)) {
+            storyPointsTotal += storyPoints
+          }
+          qaBounceBackCount += ticketBounceBacks
           const grossTime = Math.ceil(
             (new Date().getTime() - sprint.startDate.getTime()) /
               (1000 * 60 * 60 * 24)
           )
+          const existingTicket = await prisma.ticket.findUnique({
+            where: { jiraId: issueNormalized.jiraId },
+            select: { id: true },
+          })
+          const prCount = existingTicket
+            ? await prisma.devInsight.count({
+                where: {
+                  ticketId: existingTicket.id,
+                  prUrl: { not: null },
+                },
+              })
+            : 0
 
           await prisma.ticket.upsert({
             where: { jiraId: issueNormalized.jiraId },
@@ -57,6 +90,9 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
               status: issueNormalized.status as any,
               assignee: issueNormalized.assignee,
               priority: issueNormalized.priority,
+              storyPoints: storyPoints ?? null,
+              qaBounceBackCount: ticketBounceBacks,
+              prCount,
               grossTime: Math.max(0, grossTime),
             },
             create: {
@@ -67,10 +103,27 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
               status: 'TODO',
               assignee: issueNormalized.assignee,
               priority: issueNormalized.priority,
+              storyPoints: storyPoints ?? null,
+              qaBounceBackCount: ticketBounceBacks,
+              prCount,
               grossTime: Math.max(0, grossTime),
             },
           })
         }
+
+        const successPercent = totalTickets
+          ? Math.round((closedTickets / totalTickets) * 1000) / 10
+          : 0
+        await prisma.sprint.update({
+          where: { id: sprint.id },
+          data: {
+            totalTickets,
+            closedTickets,
+            successPercent,
+            storyPointsTotal,
+            qaBounceBackCount,
+          },
+        })
 
         console.log(
           `[Sprint Sync] Synced ${jiraSprint.issues.length} issues for sprint: ${normalized.name}`
@@ -84,6 +137,11 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
     console.error('[Sprint Sync] Error syncing active sprints:', error)
     throw error
   }
+}
+
+function isClosedStatus(status: string) {
+  const value = (status || '').toLowerCase()
+  return value.includes('closed') || value.includes('done') || value.includes('resolved')
 }
 
 /**

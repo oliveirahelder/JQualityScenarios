@@ -3,6 +3,9 @@ import type { JiraCredentials } from '@/lib/jira-config'
 
 let agileClient: AxiosInstance | null = null
 let agileClientKey = ''
+let coreClient: AxiosInstance | null = null
+let coreClientKey = ''
+let storyPointsFieldCache: { key: string; fieldId: string | null } | null = null
 
 function buildAuthConfig(credentials?: JiraCredentials) {
   const baseUrl = credentials?.baseUrl || process.env.JIRA_BASE_URL
@@ -56,6 +59,23 @@ function getAgileClient(credentials?: JiraCredentials): AxiosInstance {
   return agileClient
 }
 
+function getCoreClient(credentials?: JiraCredentials): AxiosInstance {
+  const { baseUrl, requestTimeout, nextKey, headers, auth } = buildAuthConfig(credentials)
+  const nextCoreKey = `${nextKey}|core`
+
+  if (!coreClient || coreClientKey !== nextCoreKey) {
+    coreClient = axios.create({
+      baseURL: `${baseUrl}/rest/api/2`,
+      auth,
+      headers,
+      timeout: requestTimeout,
+    })
+    coreClientKey = nextCoreKey
+  }
+
+  return coreClient
+}
+
 function parseBoardIds(raw: string | undefined): number[] {
   if (!raw) return []
   return raw
@@ -104,6 +124,112 @@ export interface JiraIssue {
     priority?: {
       name: string
     }
+  }
+}
+
+function matchStatus(value: string, targets: string[]) {
+  return targets.some((target) => value.includes(target))
+}
+
+function countQaBounceBacks(changelog: any): number {
+  const histories = changelog?.histories || []
+  const qaStatuses = ['in qa']
+  const devStatuses = ['in progress', 'in development', 'in refinement']
+  let count = 0
+
+  for (const history of histories) {
+    for (const item of history.items || []) {
+      if (item.field !== 'status') continue
+      const from = (item.fromString || '').toLowerCase()
+      const to = (item.toString || '').toLowerCase()
+      if (!from || !to) continue
+      if (matchStatus(from, qaStatuses) && matchStatus(to, devStatuses)) {
+        count += 1
+      }
+    }
+  }
+
+  return count
+}
+
+export async function resolveStoryPointsFieldId(
+  credentials?: JiraCredentials
+): Promise<string | null> {
+  const override = process.env.JIRA_STORY_POINTS_FIELD_ID
+  const cacheKey = `${credentials?.baseUrl || ''}|${credentials?.user || ''}|${override || ''}`
+  if (storyPointsFieldCache?.key === cacheKey) {
+    return storyPointsFieldCache.fieldId
+  }
+
+  if (override) {
+    storyPointsFieldCache = { key: cacheKey, fieldId: override }
+    return override
+  }
+
+  try {
+    const response = await getCoreClient(credentials).get('/field')
+    const fields = response.data || []
+    const normalized = fields.map((field: any) => ({
+      id: field.id as string,
+      name: (field.name || '').toLowerCase(),
+      clauseNames: (field.clauseNames || []).map((value: string) => value.toLowerCase()),
+    }))
+
+    const preferred = normalized.find((field: any) =>
+      field.name.includes('story point')
+    )
+    const fallback = normalized.find(
+      (field: any) =>
+        field.name === 'story points' ||
+        field.name === 'story point estimate' ||
+        field.name === 'estimate' ||
+        field.clauseNames.includes('story points')
+    )
+
+    const fieldId = preferred?.id || fallback?.id || null
+    storyPointsFieldCache = { key: cacheKey, fieldId }
+    return fieldId
+  } catch (error) {
+    console.warn('[Jira] Failed to resolve story points field:', error)
+    storyPointsFieldCache = { key: cacheKey, fieldId: null }
+    return null
+  }
+}
+
+export async function getIssueChangelogMetrics(
+  issueKey: string,
+  credentials?: JiraCredentials,
+  storyPointsFieldId?: string | null
+): Promise<{ storyPoints: number | null; qaBounceBackCount: number }> {
+  try {
+    const fields = ['summary', 'status']
+    if (storyPointsFieldId) {
+      fields.push(storyPointsFieldId)
+    }
+
+    const response = await getCoreClient(credentials).get(`/issue/${issueKey}`, {
+      params: {
+        expand: 'changelog',
+        fields: fields.join(','),
+      },
+    })
+
+    const storyValue =
+      storyPointsFieldId && response.data?.fields
+        ? response.data.fields[storyPointsFieldId]
+        : null
+    const storyPoints =
+      typeof storyValue === 'number'
+        ? storyValue
+        : storyValue != null
+        ? Number(storyValue)
+        : null
+
+    const qaBounceBackCount = countQaBounceBacks(response.data?.changelog)
+    return { storyPoints, qaBounceBackCount }
+  } catch (error) {
+    console.warn(`[Jira] Failed to load changelog for ${issueKey}:`, error)
+    return { storyPoints: null, qaBounceBackCount: 0 }
   }
 }
 
