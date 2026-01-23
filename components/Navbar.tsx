@@ -11,6 +11,7 @@ export default function Navbar() {
   const pathname = usePathname()
   const [isOpen, setIsOpen] = useState(false)
   const [role, setRole] = useState<string | null>(null)
+  const [userName, setUserName] = useState<string | null>(null)
 
   const handleLogout = () => {
     localStorage.removeItem('token')
@@ -27,8 +28,10 @@ export default function Navbar() {
     try {
       const parsed = JSON.parse(storedUser)
       setRole(parsed?.role || null)
+      setUserName(parsed?.name || null)
     } catch {
       setRole(null)
+      setUserName(null)
     }
   }, [])
 
@@ -41,6 +44,7 @@ export default function Navbar() {
   ]
 
   const isActive = (href: string) => pathname === href
+  const roleLabel = getRoleLabel(role)
 
   return (
     <>
@@ -79,6 +83,13 @@ export default function Navbar() {
 
             {/* User Actions */}
             <div className="flex items-center gap-2">
+              {roleLabel && (
+                <div className="hidden sm:flex flex-col items-end text-xs text-slate-300 mr-2">
+                  <span className="font-semibold text-slate-200">
+                    {roleLabel}{userName ? ` - ${userName}` : ''}
+                  </span>
+                </div>
+              )}
               {role && ['ADMIN', 'DEVOPS'].includes(role) && (
                 <Link href="/settings" className="hidden sm:flex">
                   <Button 
@@ -151,4 +162,19 @@ export default function Navbar() {
       <div className="h-16" />
     </>
   )
+}
+
+function getRoleLabel(role: string | null) {
+  switch (role) {
+    case 'ADMIN':
+      return 'Admin'
+    case 'QA':
+      return 'Tester'
+    case 'DEVELOPER':
+      return 'Developer'
+    case 'DEVOPS':
+      return "PO's"
+    default:
+      return role || ''
+  }
 }
