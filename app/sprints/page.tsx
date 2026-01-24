@@ -9,8 +9,8 @@ import { Calendar, Plus, AlertCircle, ChevronRight, Zap, RefreshCw, ChevronDown 
 
 export default function SprintsPage() {
   const [sprints, setSprints] = useState<any[]>([])
+  const [jiraBaseUrl, setJiraBaseUrl] = useState('')
   const [loading, setLoading] = useState(true)
-  const [showNewSprintForm, setShowNewSprintForm] = useState(false)
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all')
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState('')
@@ -18,12 +18,6 @@ export default function SprintsPage() {
   const [expandedSprintId, setExpandedSprintId] = useState<string | null>(null)
   const [syncBoardUrl, setSyncBoardUrl] = useState('')
   const [syncBoardIds, setSyncBoardIds] = useState('')
-  const [formData, setFormData] = useState({
-    jiraId: '',
-    name: '',
-    startDate: '',
-    endDate: '',
-  })
 
   const getSprintProgress = (tickets: any[] | undefined) => {
     const total = tickets?.length || 0
@@ -53,6 +47,20 @@ export default function SprintsPage() {
     return Number.isInteger(value) ? value.toString() : value.toFixed(1)
   }
 
+  const getDaysRemaining = (endDate: string | Date) => {
+    const end = new Date(endDate)
+    if (Number.isNaN(end.getTime())) return '--'
+    const now = new Date()
+    const diffMs = end.getTime() - now.getTime()
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+    return diffDays < 0 ? '0' : diffDays.toString()
+  }
+
+  const getJiraTicketUrl = (ticketKey: string) => {
+    if (!jiraBaseUrl || !ticketKey) return ''
+    return `${jiraBaseUrl.replace(/\/$/, '')}/browse/${ticketKey}`
+  }
+
   useEffect(() => {
     fetchSprints()
   }, [])
@@ -69,36 +77,12 @@ export default function SprintsPage() {
       if (response.ok) {
         const data = await response.json()
         setSprints(data.sprints)
+        setJiraBaseUrl(data.jiraBaseUrl || '')
       }
     } catch (error) {
       console.error('Error fetching sprints:', error)
     } finally {
       setLoading(false)
-    }
-  }
-
-  const handleCreateSprint = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    try {
-      const token = localStorage.getItem('token')
-      const response = await fetch('/api/sprints', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(formData),
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        setSprints([data.sprint, ...sprints])
-        setShowNewSprintForm(false)
-        setFormData({ jiraId: '', name: '', startDate: '', endDate: '' })
-      }
-    } catch (error) {
-      console.error('Error creating sprint:', error)
     }
   }
 
@@ -174,13 +158,6 @@ export default function SprintsPage() {
               <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
               {syncing ? 'Syncing...' : 'Sync Jira'}
             </Button>
-            <Button 
-              onClick={() => setShowNewSprintForm(!showNewSprintForm)}
-              className="btn-glow bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              New Sprint
-            </Button>
           </div>
         </div>
 
@@ -217,79 +194,6 @@ export default function SprintsPage() {
           </div>
         )}
 
-        {/* New Sprint Form */}
-        {showNewSprintForm && (
-          <Card className="glass-card border-slate-700/30 mb-8 animate-slideInUp">
-            <CardHeader className="border-b border-slate-700/30">
-              <CardTitle>Create New Sprint</CardTitle>
-              <CardDescription>Link a Jira sprint to QABOT for tracking</CardDescription>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <form onSubmit={handleCreateSprint} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-300">Jira Sprint ID</label>
-                    <Input
-                      placeholder="e.g., SPRINT-123"
-                      value={formData.jiraId}
-                      onChange={(e) => setFormData({ ...formData, jiraId: e.target.value })}
-                      required
-                      className="bg-slate-800/50 border-slate-700"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-300">Sprint Name</label>
-                    <Input
-                      placeholder="e.g., Sprint 45 - Q1 Features"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      required
-                      className="bg-slate-800/50 border-slate-700"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-300">Start Date</label>
-                    <Input
-                      type="datetime-local"
-                      value={formData.startDate}
-                      onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                      required
-                      className="bg-slate-800/50 border-slate-700"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-300">End Date</label>
-                    <Input
-                      type="datetime-local"
-                      value={formData.endDate}
-                      onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                      required
-                      className="bg-slate-800/50 border-slate-700"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-2 justify-end pt-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setShowNewSprintForm(false)}
-                    className="border-slate-700"
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit" className="btn-glow bg-gradient-to-r from-blue-600 to-blue-700">
-                    Create Sprint
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </Card>
-        )}
-
         {/* Filter Tabs */}
         <div className="flex gap-2 mb-8">
           {(['all', 'active', 'completed'] as const).map((tab) => (
@@ -324,14 +228,6 @@ export default function SprintsPage() {
                   ? 'No sprints yet. Create one to get started.' 
                   : `No ${filter} sprints found.`}
               </p>
-              {filter === 'all' && (
-                <Button 
-                  onClick={() => setShowNewSprintForm(true)}
-                  className="btn-glow bg-gradient-to-r from-blue-600 to-blue-700"
-                >
-                  Create First Sprint
-                </Button>
-              )}
             </CardContent>
           </Card>
         ) : (
@@ -372,7 +268,7 @@ export default function SprintsPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-700/30">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4 pt-4 border-t border-slate-700/30">
                         <div>
                           <div className="text-slate-500 text-xs mb-1">Tickets</div>
                           <div className="text-xl font-bold text-white">{sprint.tickets?.length || 0}</div>
@@ -403,6 +299,12 @@ export default function SprintsPage() {
                             {formatStoryPoints(sprint.storyPointsTotal)}
                           </div>
                         </div>
+                        <div>
+                          <div className="text-slate-500 text-xs mb-1">Days Left</div>
+                          <div className="text-xl font-bold text-white">
+                            {getDaysRemaining(sprint.endDate)}
+                          </div>
+                        </div>
                       </div>
 
                       <div className="mt-4">
@@ -424,7 +326,20 @@ export default function SprintsPage() {
                               {sprint.tickets.map((ticket: any) => (
                                 <div key={ticket.id} className="flex items-center justify-between text-sm">
                                   <div className="text-slate-200">
-                                    <span className="font-mono text-slate-400 mr-2">{ticket.jiraId}</span>
+                                    {jiraBaseUrl ? (
+                                      <a
+                                        href={getJiraTicketUrl(ticket.jiraId)}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="font-mono text-blue-300 hover:text-blue-200 mr-2"
+                                      >
+                                        {ticket.jiraId}
+                                      </a>
+                                    ) : (
+                                      <span className="font-mono text-slate-400 mr-2">
+                                        {ticket.jiraId}
+                                      </span>
+                                    )}
                                     {ticket.summary}
                                   </div>
                                   <div className="flex items-center gap-3 text-xs text-slate-400">

@@ -82,7 +82,7 @@ export default function LoginPage() {
               <Zap className="w-8 h-8 text-white" />
             </div>
           </div>
-          <h1 className="text-4xl font-bold text-gradient mb-2">QABOT</h1>
+          <h1 className="text-4xl font-bold text-gradient mb-2">QA Analytics</h1>
           <p className="text-slate-400 text-sm">Test Intelligence Platform</p>
         </div>
 
@@ -95,7 +95,7 @@ export default function LoginPage() {
               </CardTitle>
               <CardDescription className="text-slate-400 mt-2">
                 {isRegister
-                  ? 'Join QABOT to automate your test scenarios'
+                  ? 'Join QA Analytics to automate your test scenarios'
                   : 'Sign in to access your test scenarios and documentation'}
               </CardDescription>
             </div>

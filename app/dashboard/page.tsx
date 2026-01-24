@@ -57,10 +57,26 @@ export default function Dashboard() {
 
   const [metricsLoading, setMetricsLoading] = useState(true)
   const [metricValues, setMetricValues] = useState({
-    activeSprints: null as number | null,
-    todoTickets: null as number | null,
-    inProgressTickets: null as number | null,
-    doneTickets: null as number | null,
+    activeSprintCount: null as number | null,
+    activeSprints: [] as Array<{
+      id: string
+      name: string
+      successPercent: number
+      daysLeft: number
+      devTickets: number
+      doneTickets: number
+      bounceBackPercent: number
+      bounceBackTickets: number
+      storyPointsTotal: number
+      storyPointsCompleted: number
+      totalTickets: number
+      closedTickets: number
+    }>,
+    storyPoints: {
+      currentTotal: null as number | null,
+      previousTotal: null as number | null,
+      delta: null as number | null,
+    },
   })
 
   const [confluenceLoading, setConfluenceLoading] = useState(true)
@@ -147,10 +163,13 @@ export default function Dashboard() {
         }
         const data = await response.json()
         setMetricValues({
-          activeSprints: data.activeSprintCount ?? null,
-          todoTickets: data.ticketStatusCounts?.todo ?? null,
-          inProgressTickets: data.ticketStatusCounts?.in_progress ?? null,
-          doneTickets: data.ticketStatusCounts?.done ?? null,
+          activeSprintCount: data.activeSprintCount ?? null,
+          activeSprints: data.activeSprints || [],
+          storyPoints: {
+            currentTotal: data.storyPoints?.currentTotal ?? null,
+            previousTotal: data.storyPoints?.previousTotal ?? null,
+            delta: data.storyPoints?.delta ?? null,
+          },
         })
       } catch {
         // Keep defaults on error
@@ -370,40 +389,115 @@ export default function Dashboard() {
     }
   }
 
+  const totalDevTickets = metricValues.activeSprints.reduce(
+    (sum, sprint) => sum + sprint.devTickets,
+    0
+  )
+  const totalClosedTickets = metricValues.activeSprints.reduce(
+    (sum, sprint) => sum + sprint.doneTickets,
+    0
+  )
+  const totalTickets = metricValues.activeSprints.reduce(
+    (sum, sprint) => sum + sprint.totalTickets,
+    0
+  )
+  const totalStoryPoints = metricValues.activeSprints.reduce(
+    (sum, sprint) => sum + sprint.storyPointsTotal,
+    0
+  )
+  const totalStoryPointsCompleted = metricValues.activeSprints.reduce(
+    (sum, sprint) => sum + sprint.storyPointsCompleted,
+    0
+  )
+  const totalBounceBackTickets = metricValues.activeSprints.reduce(
+    (sum, sprint) => sum + sprint.bounceBackTickets,
+    0
+  )
+  const totalBounceBackPercent = totalTickets
+    ? Math.round((totalBounceBackTickets / totalTickets) * 1000) / 10
+    : 0
+
   const metrics = [
     {
       title: 'Active Sprints',
-      value: metricValues.activeSprints ?? '--',
-      subtitle: 'From Jira',
+      value: metricValues.activeSprintCount ?? '--',
+      subtitle: 'Success % + days left',
       icon: BarChart3,
       color: 'from-blue-600 to-blue-500',
       trend: metricsLoading ? '...' : '',
+      rows: metricValues.activeSprints.map((sprint) => ({
+        label: sprint.name,
+        value: `${sprint.successPercent}% | ${sprint.daysLeft}d`,
+      })),
     },
     {
-      title: 'Tickets - To Do',
-      value: metricValues.todoTickets ?? '--',
-      subtitle: 'Active sprints',
+      title: 'Development Tickets',
+      value: metricsLoading ? '--' : totalDevTickets,
+      subtitle: 'In progress per sprint',
       icon: Zap,
       color: 'from-purple-600 to-purple-500',
       trend: metricsLoading ? '...' : '',
+      rows: metricValues.activeSprints.map((sprint) => ({
+        label: sprint.name,
+        value: `${sprint.devTickets}`,
+      })),
     },
     {
-      title: 'Tickets - In Progress',
-      value: metricValues.inProgressTickets ?? '--',
-      subtitle: 'Active sprints',
+      title: 'Bounce-back %',
+      value: metricsLoading ? '--' : `${totalBounceBackPercent}%`,
+      subtitle: 'Tickets with returns',
       icon: BookOpen,
       color: 'from-orange-600 to-orange-500',
       trend: metricsLoading ? '...' : '',
+      rows: metricValues.activeSprints.map((sprint) => ({
+        label: sprint.name,
+        value: `${sprint.bounceBackPercent}%`,
+      })),
     },
     {
-      title: 'Tickets - Done',
-      value: metricValues.doneTickets ?? '--',
-      subtitle: 'Active sprints',
+      title: 'Tickets Closed',
+      value: metricsLoading ? '--' : totalClosedTickets,
+      subtitle: 'Closed per sprint',
       icon: CheckCircle2,
       color: 'from-green-600 to-green-500',
       trend: metricsLoading ? '...' : '',
+      rows: metricValues.activeSprints.map((sprint) => ({
+        label: sprint.name,
+        value: `${sprint.doneTickets}`,
+      })),
+    },
+    {
+      title: 'Story Points',
+      value:
+        metricValues.storyPoints.currentTotal != null
+          ? metricValues.storyPoints.currentTotal
+          : '--',
+      subtitle: 'Per active sprint',
+      icon: BookOpen,
+      color: 'from-cyan-600 to-cyan-500',
+      trend:
+        metricValues.storyPoints.delta != null
+          ? `${metricValues.storyPoints.delta >= 0 ? '+' : ''}${metricValues.storyPoints.delta}`
+          : '',
+      rows: metricValues.activeSprints.map((sprint) => ({
+        label: sprint.name,
+        value: `${sprint.storyPointsTotal}`,
+      })),
+    },
+    {
+      title: 'Closed + Story Points',
+      value: metricsLoading ? '--' : `${totalStoryPointsCompleted} / ${totalStoryPoints}`,
+      subtitle: 'Closed vs total (active)',
+      icon: CheckCircle2,
+      color: 'from-emerald-600 to-emerald-500',
+      trend: metricsLoading ? '...' : '',
+      rows: metricValues.activeSprints.map((sprint) => ({
+        label: sprint.name,
+        value: `${sprint.storyPointsCompleted} / ${sprint.storyPointsTotal} pts`,
+      })),
     },
   ]
+
 
   const quickActions = [
     {
@@ -471,7 +565,7 @@ export default function Dashboard() {
           <p className="text-slate-400">Welcome back! Here's your test intelligence overview.</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           {metrics.map((metric, idx) => (
             <div
               key={idx}
@@ -482,15 +576,25 @@ export default function Dashboard() {
               <CardContent className="p-6">
                 <div className="flex items-start justify-between mb-4">
                   <div>
-                    <p className="text-slate-400 text-sm font-medium mb-1">{metric.title}</p>
-                    <h3 className="text-3xl font-bold text-white">{metric.value}</h3>
+                    <p className="text-slate-300 text-sm font-semibold mb-1">{metric.title}</p>
+                    <h3 className="text-4xl font-bold text-white tracking-tight">{metric.value}</h3>
                   </div>
                   <metric.icon className="w-7 h-7 text-slate-400 opacity-60 group-hover:opacity-100 transition-opacity" />
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500">{metric.subtitle}</span>
+                  <span className="text-xs text-slate-400">{metric.subtitle}</span>
                   <span className="text-xs text-green-400 font-semibold">{metric.trend}</span>
                 </div>
+                {metric.rows?.length ? (
+                  <div className="mt-4 space-y-2 text-xs text-slate-300">
+                    {metric.rows.map((row) => (
+                      <div key={row.label} className="flex items-center justify-between gap-3 rounded-lg bg-slate-900/40 px-2.5 py-1.5">
+                        <span className="truncate">{row.label}</span>
+                        <span className="text-slate-100 font-semibold">{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </CardContent>
             </div>
           ))}
@@ -764,7 +868,7 @@ export default function Dashboard() {
 
         <div className="mt-12 pt-12 border-t border-slate-700/30">
           <div className="mb-6">
-            <h2 className="text-2xl font-bold text-white mb-2">Why QABOT?</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">Why QA Analytics?</h2>
             <p className="text-slate-400 text-sm">Automate, organize, and optimize your testing workflow</p>
           </div>
 
