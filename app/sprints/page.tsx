@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,8 +17,13 @@ export default function SprintsPage() {
   const [syncError, setSyncError] = useState('')
   const [syncSuccess, setSyncSuccess] = useState('')
   const [expandedSprintId, setExpandedSprintId] = useState<string | null>(null)
+  const [filterBySprint, setFilterBySprint] = useState<Record<string, 'all' | 'dev' | 'closed'>>({})
+  const [sortBySprint, setSortBySprint] = useState<
+    Record<string, 'status' | 'story' | 'bounce'>
+  >({})
   const [syncBoardUrl, setSyncBoardUrl] = useState('')
   const [syncBoardIds, setSyncBoardIds] = useState('')
+  const searchParams = useSearchParams()
 
   const getSprintProgress = (tickets: any[] | undefined) => {
     const total = tickets?.length || 0
@@ -56,14 +62,55 @@ export default function SprintsPage() {
     return diffDays < 0 ? '0' : diffDays.toString()
   }
 
+  const isDevStatus = (status: string | undefined) => {
+    const value = (status || '').toLowerCase()
+    return (
+      value.includes('in progress') ||
+      value.includes('in development') ||
+      value.includes('in refinement')
+    )
+  }
+
+  const isClosedStatus = (status: string | undefined) => {
+    const value = (status || '').toLowerCase()
+    return value.includes('closed') || value.includes('done') || value.includes('resolved')
+  }
+
   const getJiraTicketUrl = (ticketKey: string) => {
     if (!jiraBaseUrl || !ticketKey) return ''
     return `${jiraBaseUrl.replace(/\/$/, '')}/browse/${ticketKey}`
   }
 
+  const sortTickets = (tickets: any[], sortKey: 'status' | 'story' | 'bounce') => {
+    const copy = [...tickets]
+    switch (sortKey) {
+      case 'story':
+        return copy.sort((a, b) => (b.storyPoints || 0) - (a.storyPoints || 0))
+      case 'bounce':
+        return copy.sort((a, b) => (b.qaBounceBackCount || 0) - (a.qaBounceBackCount || 0))
+      case 'status':
+      default:
+        return copy.sort((a, b) => (a.status || '').localeCompare(b.status || ''))
+    }
+  }
+
   useEffect(() => {
     fetchSprints()
   }, [])
+
+  useEffect(() => {
+    if (!searchParams || sprints.length === 0) return
+    const sprintId = searchParams.get('sprintId')
+    const devOnly = searchParams.get('devOnly') === '1'
+    const closedOnly = searchParams.get('closedOnly') === '1'
+    if (!sprintId) return
+    setExpandedSprintId(sprintId)
+    const nextFilter = devOnly ? 'dev' : closedOnly ? 'closed' : 'all'
+    setFilterBySprint((prev) => ({
+      ...prev,
+      [sprintId]: nextFilter,
+    }))
+  }, [searchParams, sprints])
 
   const fetchSprints = async () => {
     try {
@@ -286,8 +333,11 @@ export default function SprintsPage() {
                                 <div className="text-xl font-bold text-blue-400">
                                   {total ? `${percent}%` : '--'}
                                 </div>
-                                <div className="text-xs text-slate-500">
-                                  {total ? `${closed} / ${total}` : '--'}
+                                <div className="text-xs text-slate-400">
+                                  {total ? `Tickets closed: ${closed} / ${total}` : 'Tickets closed: --'}
+                                </div>
+                                <div className="text-xs text-slate-400">
+                                  {total ? `Tickets remaining: ${total - closed}` : 'Tickets remaining: --'}
                                 </div>
                               </>
                             )
@@ -295,9 +345,51 @@ export default function SprintsPage() {
                         </div>
                         <div>
                           <div className="text-slate-500 text-xs mb-1">Story Points</div>
-                          <div className="text-xl font-bold text-white">
-                            {formatStoryPoints(sprint.storyPointsTotal)}
-                          </div>
+                          {(() => {
+                            const totalTickets = sprint.tickets?.length || 0
+                            const closedTickets =
+                              typeof sprint.closedTickets === 'number'
+                                ? sprint.closedTickets
+                                : getSprintProgress(sprint.tickets).closed
+                            const remainingTickets = Math.max(0, totalTickets - closedTickets)
+                            const totalStoryPoints =
+                              typeof sprint.storyPointsTotal === 'number'
+                                ? sprint.storyPointsTotal
+                                : (sprint.tickets || []).reduce(
+                                    (sum: number, ticket: any) => sum + (ticket.storyPoints || 0),
+                                    0
+                                  )
+                            const closedStoryPoints =
+                              typeof sprint.storyPointsCompleted === 'number'
+                                ? sprint.storyPointsCompleted
+                                : (sprint.tickets || []).reduce((sum: number, ticket: any) => {
+                                    const status = (ticket.status || '').toLowerCase()
+                                    const isClosed =
+                                      status.includes('closed') ||
+                                      status.includes('done') ||
+                                      status.includes('resolved')
+                                    return sum + (isClosed ? ticket.storyPoints || 0 : 0)
+                                  }, 0)
+                            const remainingStoryPoints = Math.max(
+                              0,
+                              totalStoryPoints - closedStoryPoints
+                            )
+                            return (
+                              <>
+                                <div className="text-xl font-bold text-white">
+                                  {totalStoryPoints
+                                    ? `${Math.round((closedStoryPoints / totalStoryPoints) * 1000) / 10}%`
+                                    : '--'}
+                                </div>
+                                <div className="text-xs text-slate-400 mt-1">
+                                  SP closed: {formatStoryPoints(closedStoryPoints)} / {formatStoryPoints(totalStoryPoints)}
+                                </div>
+                                <div className="text-xs text-slate-400">
+                                  SP remaining: {formatStoryPoints(remainingStoryPoints)}
+                                </div>
+                              </>
+                            )
+                          })()}
                         </div>
                         <div>
                           <div className="text-slate-500 text-xs mb-1">Days Left</div>
@@ -308,51 +400,121 @@ export default function SprintsPage() {
                       </div>
 
                       <div className="mt-4">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          onClick={() => toggleSprintTickets(sprint.id)}
-                          className="text-slate-300 hover:text-white hover:bg-slate-800/50"
-                        >
-                          <ChevronDown className={`w-4 h-4 mr-2 transition-transform ${expandedSprintId === sprint.id ? 'rotate-180' : ''}`} />
-                          {expandedSprintId === sprint.id ? 'Hide tickets' : 'View tickets'}
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => toggleSprintTickets(sprint.id)}
+                            className="text-slate-300 hover:text-white hover:bg-slate-800/50"
+                          >
+                            <ChevronDown className={`w-4 h-4 mr-2 transition-transform ${expandedSprintId === sprint.id ? 'rotate-180' : ''}`} />
+                            {expandedSprintId === sprint.id ? 'Hide tickets' : 'View tickets'}
+                          </Button>
+                          <select
+                            value={filterBySprint[sprint.id] || 'all'}
+                            onChange={(event) =>
+                              setFilterBySprint((prev) => ({
+                                ...prev,
+                                [sprint.id]: event.target.value as 'all' | 'dev' | 'closed',
+                              }))
+                            }
+                            className="bg-slate-900/40 border border-slate-700/50 text-slate-200 text-xs rounded-md px-2 py-1"
+                          >
+                            <option value="all">All tickets</option>
+                            <option value="dev">In Dev only</option>
+                            <option value="closed">Closed only</option>
+                          </select>
+                          <select
+                            value={sortBySprint[sprint.id] || 'status'}
+                            onChange={(event) =>
+                              setSortBySprint((prev) => ({
+                                ...prev,
+                                [sprint.id]: event.target.value as
+                                  | 'status'
+                                  | 'story'
+                                  | 'bounce',
+                              }))
+                            }
+                            className="bg-slate-900/40 border border-slate-700/50 text-slate-200 text-xs rounded-md px-2 py-1"
+                          >
+                            <option value="status">Status (A-Z)</option>
+                            <option value="story">Story Points</option>
+                            <option value="bounce">Bounce Back</option>
+                          </select>
+                        </div>
                       </div>
 
                       {expandedSprintId === sprint.id && (
                         <div className="mt-4 rounded-lg border border-slate-700/30 bg-slate-900/30 p-4">
-                          {sprint.tickets?.length ? (
-                            <div className="space-y-2">
-                              {sprint.tickets.map((ticket: any) => (
-                                <div key={ticket.id} className="flex items-center justify-between text-sm">
-                                  <div className="text-slate-200">
-                                    {jiraBaseUrl ? (
-                                      <a
-                                        href={getJiraTicketUrl(ticket.jiraId)}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="font-mono text-blue-300 hover:text-blue-200 mr-2"
-                                      >
-                                        {ticket.jiraId}
-                                      </a>
-                                    ) : (
-                                      <span className="font-mono text-slate-400 mr-2">
-                                        {ticket.jiraId}
-                                      </span>
-                                    )}
-                                    {ticket.summary}
-                                  </div>
-                                  <div className="flex items-center gap-3 text-xs text-slate-400">
-                                    <span>{ticket.status}</span>
-                                    <span>PRs: {ticket.prCount ?? 0}</span>
-                                    <span>Bounce: {ticket.qaBounceBackCount ?? 0}</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-slate-400 text-sm">No tickets for this sprint.</div>
-                          )}
+                          {(() => {
+                            const filterValue = filterBySprint[sprint.id] || 'all'
+                            const filtered = (sprint.tickets || []).filter((ticket: any) => {
+                              if (filterValue === 'dev' && !isDevStatus(ticket.status)) return false
+                              if (filterValue === 'closed' && !isClosedStatus(ticket.status)) {
+                                return false
+                              }
+                              return true
+                            })
+                            const sorted = sortTickets(
+                              filtered,
+                              sortBySprint[sprint.id] || 'status'
+                            )
+                            return sorted.length ? (
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full text-left text-sm">
+                                  <thead className="text-xs uppercase text-slate-400 border-b border-slate-800/60">
+                                    <tr>
+                                      <th className="py-2 pr-4">Ticket</th>
+                                      <th className="py-2 pr-4">Summary</th>
+                                      <th className="py-2 pr-4">Status</th>
+                                      <th className="py-2 pr-4">SP</th>
+                                      <th className="py-2 pr-4">PRs</th>
+                                      <th className="py-2">Bounce</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                                    {sorted.map((ticket: any) => (
+                                      <tr key={ticket.id} className="align-top">
+                                        <td className="py-2 pr-4 font-mono text-slate-300">
+                                          {jiraBaseUrl ? (
+                                            <a
+                                              href={getJiraTicketUrl(ticket.jiraId)}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="text-blue-300 hover:text-blue-200"
+                                            >
+                                              {ticket.jiraId}
+                                            </a>
+                                          ) : (
+                                            ticket.jiraId
+                                          )}
+                                        </td>
+                                        <td className="py-2 pr-4 text-slate-100 max-w-[320px]">
+                                          <span className="block truncate" title={ticket.summary}>
+                                            {ticket.summary}
+                                          </span>
+                                        </td>
+                                        <td className="py-2 pr-4 text-slate-300">
+                                          {ticket.status}
+                                        </td>
+                                        <td className="py-2 pr-4 text-slate-300">
+                                          {ticket.storyPoints ?? 0}
+                                        </td>
+                                        <td className="py-2 pr-4 text-slate-300">
+                                          {ticket.prCount ?? 0}
+                                        </td>
+                                        <td className="py-2 text-slate-300">
+                                          {ticket.qaBounceBackCount ?? 0}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              <div className="text-slate-400 text-sm">No tickets for this sprint.</div>
+                            )
+                          })()}
                         </div>
                       )}
                     </div>

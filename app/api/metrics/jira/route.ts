@@ -104,6 +104,49 @@ export async function GET(request: NextRequest) {
       (sum, sprint) => sum + sprint.storyPointsTotal,
       0
     )
+    const assigneeCounts = new Map<
+      string,
+      { total: number; closed: number; bounce: number; inProgress: number }
+    >()
+    for (const sprint of activeSprints) {
+      for (const ticket of sprint.tickets || []) {
+        const name = (ticket.assignee || '').trim() || 'Unassigned'
+        const entry = assigneeCounts.get(name) || {
+          total: 0,
+          closed: 0,
+          bounce: 0,
+          inProgress: 0,
+        }
+        entry.total += 1
+        if (
+          CLOSED_STATUSES.some((status) =>
+            (ticket.status || '').toLowerCase().includes(status)
+          )
+        ) {
+          entry.closed += 1
+        }
+        if (
+          DEV_STATUSES.some((status) =>
+            (ticket.status || '').toLowerCase().includes(status)
+          )
+        ) {
+          entry.inProgress += 1
+        }
+        if ((ticket.qaBounceBackCount || 0) > 0) {
+          entry.bounce += 1
+        }
+        assigneeCounts.set(name, entry)
+      }
+    }
+    const assignees = Array.from(assigneeCounts.entries())
+      .map(([name, entry]) => ({
+        name,
+        total: entry.total,
+        closed: entry.closed,
+        bounce: entry.bounce,
+        inProgress: entry.inProgress,
+      }))
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
     const previousSprint = await prisma.sprint.findFirst({
       where: { status: { in: ['CLOSED', 'COMPLETED'] } },
       include: { tickets: true },
@@ -124,6 +167,7 @@ export async function GET(request: NextRequest) {
         previousTotal: previousStoryPoints,
         delta: storyPointsDelta,
       },
+      assignees,
     })
   } catch (error) {
     console.error('[Metrics] Jira metrics error:', error)

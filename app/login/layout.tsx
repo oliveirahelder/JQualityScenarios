@@ -1,6 +1,6 @@
 export const metadata = {
-  title: 'QA Analytics Login',
-  description: 'Login to QA Analytics',
+  title: 'JQuality Login',
+  description: 'Login to JQuality',
 }
 
 export default function LoginLayout({

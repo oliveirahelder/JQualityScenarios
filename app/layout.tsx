@@ -3,7 +3,7 @@ import ClientLayout from './client-layout'
 import './globals.css'
 
 export const metadata = {
-  title: 'QA Analytics - Test Intelligence Platform',
+  title: 'JQuality - Test Intelligence Platform',
   description: 'Centralized intelligence platform connecting Jira, GitHub, and Confluence for automated test scenarios and documentation',
 }
 

@@ -82,7 +82,12 @@ export default function LoginPage() {
               <Zap className="w-8 h-8 text-white" />
             </div>
           </div>
-          <h1 className="text-4xl font-bold text-gradient mb-2">QA Analytics</h1>
+          <div className="flex flex-col items-center gap-4">
+            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-slate-900/90 to-slate-800/80 border border-slate-700/80 shadow-glow-blue">
+              <img src="/logo.svg" alt="JQuality logo" className="w-20 h-20" />
+            </div>
+            <h1 className="text-4xl font-bold text-gradient mb-2">JQuality</h1>
+          </div>
           <p className="text-slate-400 text-sm">Test Intelligence Platform</p>
         </div>
 
@@ -95,7 +100,7 @@ export default function LoginPage() {
               </CardTitle>
               <CardDescription className="text-slate-400 mt-2">
                 {isRegister
-                  ? 'Join QA Analytics to automate your test scenarios'
+                  ? 'Join JQuality to automate your test scenarios'
                   : 'Sign in to access your test scenarios and documentation'}
               </CardDescription>
             </div>

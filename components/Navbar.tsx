@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
-import { Zap, Menu, X, LogOut, Settings } from 'lucide-react'
+import { Menu, X, LogOut, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export default function Navbar() {
@@ -53,11 +53,11 @@ export default function Navbar() {
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
             <Link href="/dashboard" className="flex items-center gap-3 group">
-              <div className="p-2 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg group-hover:shadow-glow-blue transition-all duration-300">
-                <Zap className="w-5 h-5 text-white" />
+              <div className="p-3 bg-gradient-to-br from-slate-900/90 to-slate-800/80 rounded-2xl group-hover:shadow-glow-blue transition-all duration-300 border border-slate-700/80">
+                <img src="/logo.svg" alt="JQuality logo" className="w-14 h-14" />
               </div>
               <div className="hidden sm:flex flex-col">
-                <span className="text-lg font-bold text-white">QA Analytics</span>
+                <span className="text-lg font-bold text-white">JQuality</span>
                 <span className="text-xs text-slate-400">Test Intelligence</span>
               </div>
             </Link>
