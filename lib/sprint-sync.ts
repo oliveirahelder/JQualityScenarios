@@ -16,6 +16,21 @@ import { ensureSprintSnapshot } from '@/lib/sprint-snapshot'
 
 const CLOSED_CUTOFF_DATE = new Date(Date.UTC(2025, 11, 1))
 
+type JiraSprintReportIssue = {
+  estimateStatistic?: { statFieldValue?: { value?: number | string | null } }
+  currentEstimateStatistic?: { statFieldValue?: { value?: number | string | null } }
+  statusName?: string
+  status?: string
+}
+
+type JiraSprintReport = {
+  contents?: {
+    completedIssues?: JiraSprintReportIssue[]
+    issuesNotCompletedInCurrentSprint?: JiraSprintReportIssue[]
+    issuesRemovedFromSprint?: JiraSprintReportIssue[]
+  }
+}
+
 /**
  * Sync active sprints from Jira to database
  * Call this periodically (e.g., every 5 minutes via cron job)
@@ -312,7 +327,11 @@ async function syncSprintIssuesLite(
   const issues = jiraSprint.issues || (await getSprintIssues(jiraSprint.id, credentials))
   if (!issues || issues.length === 0) {
     if (jiraSprint.boardId) {
-      const report = await getSprintReport(jiraSprint.boardId, jiraSprint.id, credentials)
+      const report = (await getSprintReport(
+        jiraSprint.boardId,
+        jiraSprint.id,
+        credentials
+      )) as JiraSprintReport
       const completedIssues = report?.contents?.completedIssues || []
       const notCompleted = report?.contents?.issuesNotCompletedInCurrentSprint || []
       if (!completedIssues.length && !notCompleted.length) return
