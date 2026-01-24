@@ -69,8 +69,32 @@ model Sprint {
   // Relations
   tickets   Ticket[]
   documentationDrafts DocumentationDraft[]
+  snapshot SprintSnapshot?
 
   @@map("sprints")
+}
+
+// SprintSnapshot model - immutable snapshot of a sprint at closure
+model SprintSnapshot {
+  id        String   @id @default(cuid())
+  sprintId  String   @unique
+  sprint    Sprint   @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+  jiraId    String
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  status    String
+
+  totals    String
+  tickets   String
+  assignees String
+  deliveryTimes String?
+  ticketTimes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sprint_snapshots")
 }
 
 // Ticket model - represents individual Jira tickets

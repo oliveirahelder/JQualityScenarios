@@ -87,6 +87,10 @@ export default function Navbar() {
     { href: '/documentation', label: 'Docs', icon: '📚' },
     { href: '/search', label: 'Search', icon: '🔍' },
   ]
+  const adminLinks = [
+    { href: '/reports', label: 'Reports', icon: 'R' },
+  ]
+
 
   const isActive = (href: string) => pathname === href
   const roleLabel = getRoleLabel(role)
@@ -113,6 +117,21 @@ export default function Navbar() {
             {/* Desktop Navigation */}
             <div className="hidden md:flex items-center gap-1">
               {navLinks.map((link) => (
+                <Link key={link.href} href={link.href}>
+                  <Button 
+                    variant="ghost" 
+                    className={`transition-all duration-200 ${
+                      isActive(link.href)
+                        ? 'text-blue-400 bg-blue-500/10 border-l-2 border-blue-500'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
+                    }`}
+                  >
+                    <span className="mr-1.5">{link.icon}</span>
+                    {link.label}
+                  </Button>
+                </Link>
+              ))}
+              {role === 'ADMIN' && adminLinks.map((link) => (
                 <Link key={link.href} href={link.href}>
                   <Button 
                     variant="ghost" 
@@ -186,6 +205,25 @@ export default function Navbar() {
           {isOpen && (
             <div className="md:hidden pb-4 space-y-2 animate-slideInUp border-t border-slate-700/50 pt-4">
               {navLinks.map((link) => (
+                <Link 
+                  key={link.href} 
+                  href={link.href} 
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Button 
+                    variant="ghost" 
+                    className={`w-full justify-start transition-all duration-200 ${
+                      isActive(link.href)
+                        ? 'text-blue-400 bg-blue-500/10'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
+                    }`}
+                  >
+                    <span className="mr-2">{link.icon}</span>
+                    {link.label}
+                  </Button>
+                </Link>
+              ))}
+              {role === 'ADMIN' && adminLinks.map((link) => (
                 <Link 
                   key={link.href} 
                   href={link.href} 

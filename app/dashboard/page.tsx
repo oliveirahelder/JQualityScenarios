@@ -30,10 +30,7 @@ export default function Dashboard() {
       storyPointsCompleted: number
       totalTickets: number
       closedTickets: number
-      topClosed: { name: string; total: number; closed: number; remaining: number } | null
-      bottomClosed: { name: string; total: number; closed: number; remaining: number } | null
-      topRemaining: { name: string; total: number; closed: number; remaining: number } | null
-      bottomRemaining: { name: string; total: number; closed: number; remaining: number } | null
+      assignees: Array<{ name: string; total: number; closed: number }>
     }>,
     storyPoints: {
       currentTotal: null as number | null,
@@ -47,15 +44,24 @@ export default function Dashboard() {
       bounce: number
       inProgress: number
     }>,
+    deliveryTimes: [] as Array<{
+      name: string
+      ticketCount: number
+      averageHours: number
+      totalHours: number
+    }>,
+    deliveryTimesBySprint: [] as Array<{
+      sprintId: string
+      sprintName: string
+      entries: Array<{
+        name: string
+        ticketCount: number
+        averageHours: number
+        totalHours: number
+      }>
+    }>,
   })
-  const [connectionStatus, setConnectionStatus] = useState({
-    jira: 'disconnected',
-    confluence: 'disconnected',
-    github: 'disconnected',
-    database: 'connected',
-  })
-
-
+  const [deliverySprintId, setDeliverySprintId] = useState('all')
   useEffect(() => {
     const loadMetrics = async () => {
       try {
@@ -76,6 +82,8 @@ export default function Dashboard() {
             delta: data.storyPoints?.delta ?? null,
           },
           assignees: data.assignees || [],
+          deliveryTimes: data.deliveryTimes || [],
+          deliveryTimesBySprint: data.deliveryTimesBySprint || [],
         })
       } catch {
         // Keep defaults on error
@@ -85,45 +93,6 @@ export default function Dashboard() {
     }
 
     loadMetrics()
-  }, [])
-
-  useEffect(() => {
-    const loadConnections = async () => {
-      try {
-        const authToken = localStorage.getItem('token')
-        const [jiraResponse, confluenceResponse] = await Promise.all([
-          fetch('/api/integrations/jira', {
-            headers: { Authorization: `Bearer ${authToken}` },
-          }),
-          fetch('/api/integrations/confluence', {
-            headers: { Authorization: `Bearer ${authToken}` },
-          }),
-        ])
-
-        let jiraStatus = 'disconnected'
-        if (jiraResponse.ok) {
-          const jiraData = await jiraResponse.json()
-          jiraStatus = jiraData?.connectionStatus === 'connected' ? 'connected' : 'disconnected'
-        }
-
-        let confluenceStatus = 'disconnected'
-        if (confluenceResponse.ok) {
-          const confluenceData = await confluenceResponse.json()
-          confluenceStatus =
-            confluenceData?.connectionStatus === 'connected' ? 'connected' : 'disconnected'
-        }
-
-        setConnectionStatus((prev) => ({
-          ...prev,
-          jira: jiraStatus,
-          confluence: confluenceStatus,
-        }))
-      } catch {
-        // Keep defaults on error
-      }
-    }
-
-    loadConnections()
   }, [])
 
   const totalDevTickets = metricValues.activeSprints.reduce(
@@ -154,7 +123,7 @@ export default function Dashboard() {
     ? Math.round((totalBounceBackTickets / totalTickets) * 1000) / 10
     : 0
 
-  const metrics = [
+  const generalMetrics = [
     {
       title: 'Active Sprints',
       value: metricValues.activeSprintCount ?? '--',
@@ -236,58 +205,241 @@ export default function Dashboard() {
         value: `${sprint.storyPointsCompleted} / ${sprint.storyPointsTotal} pts`,
       })),
     },
-    {
-      title: 'Delivery Commitment',
-      value: metricValues.activeSprintCount ?? '--',
-      subtitle: 'Assignee SP delivery per sprint',
-      icon: Zap,
-      color: 'from-amber-600 to-amber-500',
-      trend: metricsLoading ? '...' : '',
-      rows: metricValues.activeSprints.map((sprint) => {
-        const topClosed = sprint.topClosed
-          ? `${sprint.topClosed.name} (${sprint.topClosed.total}/${sprint.topClosed.closed})`
-          : 'N/A'
-        const bottomClosed = sprint.bottomClosed
-          ? `${sprint.bottomClosed.name} (${sprint.bottomClosed.total}/${sprint.bottomClosed.closed})`
-          : 'N/A'
-        const topRemaining = sprint.topRemaining
-          ? `${sprint.topRemaining.name} (${sprint.topRemaining.total}/${sprint.topRemaining.remaining})`
-          : 'N/A'
-        const bottomRemaining = sprint.bottomRemaining
-          ? `${sprint.bottomRemaining.name} (${sprint.bottomRemaining.total}/${sprint.bottomRemaining.remaining})`
-          : 'N/A'
-        return {
-          label: sprint.name,
-          lines: [
-            `Most closed: ${topClosed}`,
-            `Least closed: ${bottomClosed}`,
-            `Most remaining: ${topRemaining}`,
-            `Least remaining: ${bottomRemaining}`,
-          ],
-        }
-      }),
-    },
-    {
-      title: 'Assignees',
-      value: metricsLoading ? '--' : metricValues.assignees.length,
-      subtitle: '',
-      icon: User,
-      color: 'from-slate-600 to-slate-500',
-      trend: metricsLoading ? '...' : '',
-      span: 2,
-      columns: ['Assignee', 'Assigned', 'In Progress', 'Closed', 'Bounce'],
-      rows: metricValues.assignees.map((assignee) => ({
-        label: assignee.name,
-        columns: [
-          assignee.name,
-          `${assignee.total}`,
-          `${assignee.inProgress}`,
-          `${assignee.closed}`,
-          `${assignee.bounce}`,
-        ],
-      })),
-    },
   ]
+
+  const deliveryMetrics = metricValues.activeSprints.map((sprint, index) => ({
+    title: `Delivery Commitment - ${sprint.name}`,
+    value: metricsLoading ? '--' : `${sprint.storyPointsCompleted} / ${sprint.storyPointsTotal}`,
+    subtitle: 'Allocated vs delivered',
+    icon: Zap,
+    color: index % 2 === 0 ? 'from-amber-600 to-amber-500' : 'from-amber-500 to-orange-500',
+    trend: metricsLoading ? '...' : '',
+    rows: [
+      {
+        label: 'Assignees',
+        columns: ['Assignee', 'Allocated', 'Delivered'],
+        rows: sprint.assignees.map((assignee) => [
+          {
+            value: assignee.name,
+            href: `/sprints?sprintId=${sprint.id}&assignee=${encodeURIComponent(assignee.name)}`,
+          },
+          `${assignee.total}`,
+          `${assignee.closed}`,
+        ]),
+      },
+    ],
+  }))
+
+  const selectedDeliveryEntries =
+    deliverySprintId === 'all'
+      ? metricValues.deliveryTimes
+      : metricValues.deliveryTimesBySprint.find(
+          (sprint) => sprint.sprintId === deliverySprintId
+        )?.entries || []
+
+  const assigneesMetric = {
+    title: 'Assignees',
+    value: metricsLoading ? '--' : metricValues.assignees.length,
+    subtitle: '',
+    icon: User,
+    color: 'from-slate-600 to-slate-500',
+    trend: metricsLoading ? '...' : '',
+    columns: ['Assignee', 'Assigned', 'In Progress', 'Closed', 'Bounce'],
+    rows: metricValues.assignees.map((assignee) => ({
+      label: assignee.name,
+      columns: [
+        assignee.name,
+        {
+          value: `${assignee.total}`,
+          href: `/sprints?assignee=${encodeURIComponent(assignee.name)}`,
+        },
+        {
+          value: `${assignee.inProgress}`,
+          href: `/sprints?assignee=${encodeURIComponent(assignee.name)}&devOnly=1`,
+        },
+        {
+          value: `${assignee.closed}`,
+          href: `/sprints?assignee=${encodeURIComponent(assignee.name)}&closedOnly=1`,
+        },
+        {
+          value: `${assignee.bounce}`,
+          href: `/sprints?assignee=${encodeURIComponent(assignee.name)}&bounceOnly=1`,
+        },
+      ],
+    })),
+  }
+
+  const deliveryTimeMetric = {
+    title: 'Delivery Time',
+    value: metricsLoading ? '--' : selectedDeliveryEntries.length,
+    subtitle: 'Average business hours per ticket',
+    icon: Zap,
+    color: 'from-sky-600 to-sky-500',
+    trend: metricsLoading ? '...' : '',
+    filter: (
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="text-slate-400">Sprint</span>
+        <select
+          className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+          value={deliverySprintId}
+          onChange={(event) => setDeliverySprintId(event.target.value)}
+        >
+          <option value="all">All active sprints</option>
+          {metricValues.activeSprints.map((sprint) => (
+            <option key={sprint.id} value={sprint.id}>
+              {sprint.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    ),
+    columns: ['Assignee', 'Tickets', 'Avg Hours', 'Total Hours'],
+    rows: selectedDeliveryEntries.map((entry) => ({
+      label: entry.name,
+      columns: [
+        entry.name,
+        `${entry.ticketCount}`,
+        `${entry.averageHours}h`,
+        `${entry.totalHours}h`,
+      ],
+    })),
+  }
+
+  const renderMetricCard = (metric: any, key: string) => {
+    const card = (
+      <div className="glass-card rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all duration-300 animate-slideInUp">
+        <div className={`h-1 bg-gradient-to-r ${metric.color}`}></div>
+        <CardContent className="p-6">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <p className="text-slate-300 text-sm font-semibold mb-1">{metric.title}</p>
+              <h3 className="text-3xl font-bold text-white tracking-tight">{metric.value}</h3>
+            </div>
+            <metric.icon className="w-7 h-7 text-slate-400 opacity-60 group-hover:opacity-100 transition-opacity" />
+          </div>
+          {metric.subtitle ? (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">{metric.subtitle}</span>
+              <span className="text-xs text-green-400 font-semibold">{metric.trend}</span>
+            </div>
+          ) : null}
+          {metric.filter ? <div className="mt-3">{metric.filter}</div> : null}
+          {metric.rows?.length ? (
+            <div className="mt-4 space-y-2 text-xs text-slate-300">
+              {metric.columns ? (
+                <div
+                  className="grid gap-2 text-[10px] uppercase text-slate-500 text-center"
+                  style={{ gridTemplateColumns: `repeat(${metric.columns.length}, minmax(0, 1fr))` }}
+                >
+                  {metric.columns.map((column: string) => (
+                    <span key={column}>{column}</span>
+                  ))}
+                </div>
+              ) : null}
+              {metric.rows.map((row: any, index: number) => {
+                if (row.columns && row.rows) {
+                  return (
+                    <div
+                      key={`${row.label}-${index}`}
+                      className="rounded-lg bg-slate-900/40 px-2.5 py-2"
+                    >
+                      <div className="text-[11px] uppercase text-slate-500 mb-1">
+                        {row.label}
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-[10px] uppercase text-slate-500 text-center mb-2">
+                        {row.columns.map((column: string) => (
+                          <span key={`${row.label}-${column}`}>{column}</span>
+                        ))}
+                      </div>
+                      <div className="space-y-1">
+                        {row.rows.map((values: any[], rowIndex: number) => (
+                          <div
+                            key={`${row.label}-row-${rowIndex}`}
+                            className="grid grid-cols-3 gap-2 rounded-md bg-slate-900/50 px-2 py-1 text-xs text-slate-100 text-center"
+                          >
+                            {values.map((value, valueIndex) => {
+                              const content =
+                                typeof value === 'object' && value && value.href ? (
+                                  <Link href={value.href} className="text-blue-300 hover:text-blue-200">
+                                    {value.value}
+                                  </Link>
+                                ) : (
+                                  value
+                                )
+                              return (
+                                <span
+                                  key={`${row.label}-${rowIndex}-${valueIndex}`}
+                                  className={valueIndex === 0 ? 'truncate' : ''}
+                                >
+                                  {content}
+                                </span>
+                              )
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                }
+                if (metric.columns && row.columns) {
+                  return (
+                    <div
+                      key={row.label}
+                      className="grid gap-2 rounded-lg bg-slate-900/40 px-2.5 py-1.5 text-xs text-slate-100 text-center"
+                      style={{ gridTemplateColumns: `repeat(${row.columns.length}, minmax(0, 1fr))` }}
+                    >
+                      {row.columns.map((value: any, valueIndex: number) => {
+                        const content =
+                          typeof value === 'object' && value && value.href ? (
+                            <Link href={value.href} className="text-blue-300 hover:text-blue-200">
+                              {value.value}
+                            </Link>
+                          ) : (
+                            value
+                          )
+                        return (
+                          <span key={`${row.label}-${valueIndex}`} className={valueIndex === 0 ? 'truncate' : ''}>
+                            {content}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )
+                }
+                const rowContent = (
+                  <div
+                    className={`flex items-center justify-between gap-3 rounded-lg bg-slate-900/40 px-2.5 py-1.5 ${
+                      row.href ? 'hover:bg-slate-900/60 transition-colors' : ''
+                    }`}
+                  >
+                    <span className="truncate">{row.label}</span>
+                    <span className="text-slate-100 font-semibold">{row.value}</span>
+                  </div>
+                )
+                if (!row.href) {
+                  return <div key={row.label}>{rowContent}</div>
+                }
+                return (
+                  <Link key={row.label} href={row.href} className="block">
+                    {rowContent}
+                  </Link>
+                )
+              })}
+            </div>
+          ) : null}
+        </CardContent>
+      </div>
+    )
+
+    if (!metric.href) {
+      return <div key={key}>{card}</div>
+    }
+    return (
+      <Link key={key} href={metric.href} className="block">
+        {card}
+      </Link>
+    )
+  }
 
 
   const quickActions = [
@@ -333,117 +485,42 @@ export default function Dashboard() {
           <p className="text-slate-400">Welcome back! Here's your test intelligence overview.</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          {metrics.map((metric, idx) => {
-            const card = (
-              <div
-                className={`glass-card rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all duration-300 animate-slideInUp ${
-                  metric.span === 2 ? 'lg:col-span-2' : ''
-                }`}
-                style={{ animationDelay: `${idx * 100}ms` }}
-              >
-                <div className={`h-1 bg-gradient-to-r ${metric.color}`}></div>
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <p className="text-slate-300 text-sm font-semibold mb-1">{metric.title}</p>
-                      <h3 className="text-4xl font-bold text-white tracking-tight">
-                        {metric.value}
-                      </h3>
-                    </div>
-                    <metric.icon className="w-7 h-7 text-slate-400 opacity-60 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-slate-400">{metric.subtitle}</span>
-                    <span className="text-xs text-green-400 font-semibold">{metric.trend}</span>
-                  </div>
-                  {metric.rows?.length ? (
-                    <div className="mt-4 space-y-2 text-xs text-slate-300">
-                    {metric.columns ? (
-                      <div className="grid grid-cols-5 gap-2 text-[10px] uppercase text-slate-500 text-center">
-                        {metric.columns.map((column) => (
-                          <span key={column}>{column}</span>
-                        ))}
-                      </div>
-                    ) : null}
-                    {metric.rows.map((row) => {
-                      if (metric.columns && row.columns) {
-                        return (
-                          <div
-                            key={row.label}
-                            className="grid grid-cols-5 gap-2 rounded-lg bg-slate-900/40 px-2.5 py-1.5 text-xs text-slate-100 text-center"
-                          >
-                            {row.columns.map((value, index) => (
-                              <span
-                                key={`${row.label}-${index}`}
-                                className={index === 0 ? 'truncate' : ''}
-                              >
-                                {value}
-                              </span>
-                            ))}
-                          </div>
-                        )
-                      }
-                      if (row.lines) {
-                        return (
-                          <div
-                            key={row.label}
-                            className="rounded-lg bg-slate-900/40 px-2.5 py-2"
-                          >
-                            <div className="text-[11px] uppercase text-slate-500 mb-1">
-                              {row.label}
-                            </div>
-                            <div className="space-y-1 text-xs text-slate-200">
-                              {row.lines.map((line, index) => (
-                                <div key={`${row.label}-line-${index}`} className="flex justify-between gap-2">
-                                  <span className="truncate">{line}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )
-                      }
-                      const rowContent = (
-                        <div
-                          className={`flex items-center justify-between gap-3 rounded-lg bg-slate-900/40 px-2.5 py-1.5 ${
-                            row.href ? 'hover:bg-slate-900/60 transition-colors' : ''
-                          }`}
-                        >
-                          <span className="truncate">{row.label}</span>
-                          <span
-                            className={`text-slate-100 font-semibold ${
-                              row.wrap ? 'whitespace-normal text-right text-[11px] leading-4' : ''
-                            }`}
-                          >
-                            {row.value}
-                          </span>
-                        </div>
-                      )
-                      if (!row.href) {
-                        return <div key={row.label}>{rowContent}</div>
-                      }
-                      return (
-                        <Link key={row.label} href={row.href} className="block">
-                          {rowContent}
-                        </Link>
-                      )
-                    })}
-                  </div>
-                ) : null}
-                </CardContent>
-              </div>
-            )
+        <div className="mb-8">
+          <div className="mb-4">
+            <h2 className="text-2xl font-bold text-white">Overview</h2>
+            <p className="text-slate-400 text-sm">Key sprint and delivery signals</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {generalMetrics.map((metric, idx) => renderMetricCard(metric, `general-${idx}`))}
+          </div>
+        </div>
 
-            if (!metric.href) {
-              return <div key={idx} className={metric.span === 2 ? 'lg:col-span-2' : ''}>{card}</div>
-            }
+        <div className="mb-8">
+          <div className="mb-4">
+            <h2 className="text-2xl font-bold text-white">Delivery Commitment</h2>
+            <p className="text-slate-400 text-sm">Story points allocated vs delivered per sprint</p>
+          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {deliveryMetrics.map((metric, idx) => renderMetricCard(metric, `delivery-${idx}`))}
+          </div>
+        </div>
 
-            return (
-              <Link key={idx} href={metric.href} className={metric.span === 2 ? 'lg:col-span-2' : 'block'}>
-                {card}
-              </Link>
-            )
-          })}
+        <div className="mb-8">
+          <div className="mb-4">
+            <h2 className="text-2xl font-bold text-white">Assignees</h2>
+            <p className="text-slate-400 text-sm">Assigned workload across active sprints</p>
+          </div>
+          {renderMetricCard(assigneesMetric, 'assignees')}
+        </div>
+
+        <div className="mb-8">
+          <div className="mb-4">
+            <h2 className="text-2xl font-bold text-white">Delivery Time</h2>
+            <p className="text-slate-400 text-sm">
+              Time from In Progress to Closed (8h business days)
+            </p>
+          </div>
+          {renderMetricCard(deliveryTimeMetric, 'delivery-time')}
         </div>
 
         <div className="mb-12">

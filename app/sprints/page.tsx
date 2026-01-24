@@ -6,7 +6,7 @@ import { useSearchParams } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Calendar, Plus, AlertCircle, ChevronRight, Zap, RefreshCw, ChevronDown } from 'lucide-react'
+import { Calendar, Plus, AlertCircle, ChevronRight, Zap, RefreshCw } from 'lucide-react'
 
 export default function SprintsPage() {
   const [sprints, setSprints] = useState<any[]>([])
@@ -16,11 +16,16 @@ export default function SprintsPage() {
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState('')
   const [syncSuccess, setSyncSuccess] = useState('')
-  const [expandedSprintId, setExpandedSprintId] = useState<string | null>(null)
-  const [filterBySprint, setFilterBySprint] = useState<Record<string, 'all' | 'dev' | 'closed'>>({})
+  const [syncingClosed, setSyncingClosed] = useState(false)
+  const [syncClosedMessage, setSyncClosedMessage] = useState('')
+  const [syncClosedError, setSyncClosedError] = useState('')
+  const [filterBySprint, setFilterBySprint] = useState<
+    Record<string, 'all' | 'dev' | 'closed' | 'bounce'>
+  >({})
   const [sortBySprint, setSortBySprint] = useState<
     Record<string, 'status' | 'story' | 'bounce'>
   >({})
+  const [assigneeFilterBySprint, setAssigneeFilterBySprint] = useState<Record<string, string>>({})
   const [syncBoardUrl, setSyncBoardUrl] = useState('')
   const [syncBoardIds, setSyncBoardIds] = useState('')
   const searchParams = useSearchParams()
@@ -103,13 +108,33 @@ export default function SprintsPage() {
     const sprintId = searchParams.get('sprintId')
     const devOnly = searchParams.get('devOnly') === '1'
     const closedOnly = searchParams.get('closedOnly') === '1'
-    if (!sprintId) return
-    setExpandedSprintId(sprintId)
-    const nextFilter = devOnly ? 'dev' : closedOnly ? 'closed' : 'all'
-    setFilterBySprint((prev) => ({
-      ...prev,
-      [sprintId]: nextFilter,
-    }))
+    const bounceOnly = searchParams.get('bounceOnly') === '1'
+    const assignee = searchParams.get('assignee')
+    const nextFilter = devOnly ? 'dev' : closedOnly ? 'closed' : bounceOnly ? 'bounce' : 'all'
+    if (sprintId) {
+      setFilterBySprint((prev) => ({
+        ...prev,
+        [sprintId]: nextFilter,
+      }))
+      if (assignee) {
+        setAssigneeFilterBySprint((prev) => ({
+          ...prev,
+          [sprintId]: decodeURIComponent(assignee),
+        }))
+      }
+      return
+    }
+    if (assignee) {
+      const decoded = decodeURIComponent(assignee)
+      const nextAssigneeFilters: Record<string, string> = {}
+      const nextFilters: Record<string, 'all' | 'dev' | 'closed' | 'bounce'> = {}
+      for (const sprint of sprints) {
+        nextAssigneeFilters[sprint.id] = decoded
+        nextFilters[sprint.id] = nextFilter
+      }
+      setAssigneeFilterBySprint(nextAssigneeFilters)
+      setFilterBySprint(nextFilters)
+    }
   }, [searchParams, sprints])
 
   const fetchSprints = async () => {
@@ -176,13 +201,43 @@ export default function SprintsPage() {
     }
   }
 
-  const toggleSprintTickets = (sprintId: string) => {
-    setExpandedSprintId((prev) => (prev === sprintId ? null : sprintId))
+  const handleSyncClosed = async () => {
+    setSyncingClosed(true)
+    setSyncClosedMessage('')
+    setSyncClosedError('')
+
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch('/api/admin/sprints/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ mode: 'closed' }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to sync closed sprints')
+      }
+      const count = data?.data?.closedSprintCount
+      setSyncClosedMessage(
+        typeof count === 'number'
+          ? `Closed sprints synced: ${count}.`
+          : 'Closed sprints synced.'
+      )
+    } catch (error) {
+      setSyncClosedError(
+        error instanceof Error ? error.message : 'Failed to sync closed sprints'
+      )
+    } finally {
+      setSyncingClosed(false)
+    }
   }
 
   const filteredSprints = sprints.filter(sprint => {
     if (filter === 'active') return sprint.status === 'ACTIVE'
-    if (filter === 'completed') return sprint.status === 'COMPLETED'
+    if (filter === 'completed') return sprint.status === 'COMPLETED' || sprint.status === 'CLOSED'
     return true
   })
 
@@ -205,6 +260,14 @@ export default function SprintsPage() {
               <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
               {syncing ? 'Syncing...' : 'Sync Jira'}
             </Button>
+            <Button
+              variant="outline"
+              onClick={handleSyncClosed}
+              disabled={syncingClosed}
+              className="border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800/50"
+            >
+              {syncingClosed ? 'Syncing closed...' : 'Sync Closed Sprints'}
+            </Button>
           </div>
         </div>
 
@@ -224,7 +287,7 @@ export default function SprintsPage() {
           />
         </div>
 
-        {(syncError || syncSuccess) && (
+        {(syncError || syncSuccess || syncClosedError || syncClosedMessage) && (
           <div className="mb-6">
             {syncError && (
               <div className="p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-300 text-sm flex items-center gap-2">
@@ -236,6 +299,18 @@ export default function SprintsPage() {
               <div className="p-3 bg-green-500/10 border border-green-500/50 rounded-lg text-green-300 text-sm flex items-center gap-2">
                 <Zap className="w-4 h-4" />
                 <span>{syncSuccess}</span>
+              </div>
+            )}
+            {syncClosedError && (
+              <div className="mt-2 p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-300 text-sm flex items-center gap-2">
+                <AlertCircle className="w-4 h-4" />
+                <span>{syncClosedError}</span>
+              </div>
+            )}
+            {syncClosedMessage && (
+              <div className="mt-2 p-3 bg-green-500/10 border border-green-500/50 rounded-lg text-green-300 text-sm flex items-center gap-2">
+                <Zap className="w-4 h-4" />
+                <span>{syncClosedMessage}</span>
               </div>
             )}
           </div>
@@ -295,7 +370,7 @@ export default function SprintsPage() {
                         <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
                           sprint.status === 'ACTIVE'
                             ? 'bg-green-500/20 text-green-300 border border-green-500/30'
-                            : sprint.status === 'COMPLETED'
+                            : sprint.status === 'COMPLETED' || sprint.status === 'CLOSED'
                             ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
                             : 'bg-slate-500/20 text-slate-300 border border-slate-500/30'
                         }`}>
@@ -401,21 +476,16 @@ export default function SprintsPage() {
 
                       <div className="mt-4">
                         <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            onClick={() => toggleSprintTickets(sprint.id)}
-                            className="text-slate-300 hover:text-white hover:bg-slate-800/50"
-                          >
-                            <ChevronDown className={`w-4 h-4 mr-2 transition-transform ${expandedSprintId === sprint.id ? 'rotate-180' : ''}`} />
-                            {expandedSprintId === sprint.id ? 'Hide tickets' : 'View tickets'}
-                          </Button>
                           <select
                             value={filterBySprint[sprint.id] || 'all'}
                             onChange={(event) =>
                               setFilterBySprint((prev) => ({
                                 ...prev,
-                                [sprint.id]: event.target.value as 'all' | 'dev' | 'closed',
+                                [sprint.id]: event.target.value as
+                                  | 'all'
+                                  | 'dev'
+                                  | 'closed'
+                                  | 'bounce',
                               }))
                             }
                             className="bg-slate-900/40 border border-slate-700/50 text-slate-200 text-xs rounded-md px-2 py-1"
@@ -423,6 +493,7 @@ export default function SprintsPage() {
                             <option value="all">All tickets</option>
                             <option value="dev">In Dev only</option>
                             <option value="closed">Closed only</option>
+                            <option value="bounce">Bounce only</option>
                           </select>
                           <select
                             value={sortBySprint[sprint.id] || 'status'}
@@ -441,82 +512,111 @@ export default function SprintsPage() {
                             <option value="story">Story Points</option>
                             <option value="bounce">Bounce Back</option>
                           </select>
+                          {assigneeFilterBySprint[sprint.id] ? (
+                            <div className="flex items-center gap-2 text-xs text-slate-300">
+                              <span className="rounded-md bg-slate-900/60 px-2 py-1">
+                                Assignee: {assigneeFilterBySprint[sprint.id]}
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() =>
+                                  setAssigneeFilterBySprint((prev) => {
+                                    const next = { ...prev }
+                                    delete next[sprint.id]
+                                    return next
+                                  })
+                                }
+                                className="text-slate-400 hover:text-white hover:bg-slate-800/50"
+                              >
+                                Clear
+                              </Button>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
 
-                      {expandedSprintId === sprint.id && (
-                        <div className="mt-4 rounded-lg border border-slate-700/30 bg-slate-900/30 p-4">
-                          {(() => {
-                            const filterValue = filterBySprint[sprint.id] || 'all'
-                            const filtered = (sprint.tickets || []).filter((ticket: any) => {
-                              if (filterValue === 'dev' && !isDevStatus(ticket.status)) return false
-                              if (filterValue === 'closed' && !isClosedStatus(ticket.status)) {
+                      <div className="mt-4 rounded-lg border border-slate-700/30 bg-slate-900/30 p-4">
+                        {(() => {
+                          const filterValue = filterBySprint[sprint.id] || 'all'
+                          const filtered = (sprint.tickets || []).filter((ticket: any) => {
+                            if (filterValue === 'dev' && !isDevStatus(ticket.status)) return false
+                            if (filterValue === 'closed' && !isClosedStatus(ticket.status)) {
+                              return false
+                            }
+                            if (filterValue === 'bounce' && (ticket.qaBounceBackCount || 0) === 0) {
+                              return false
+                            }
+                            const assigneeFilter = assigneeFilterBySprint[sprint.id]
+                            if (assigneeFilter) {
+                              const ticketAssignee = (ticket.assignee || '').toLowerCase().trim()
+                              if (ticketAssignee !== assigneeFilter.toLowerCase().trim()) {
                                 return false
                               }
-                              return true
-                            })
-                            const sorted = sortTickets(
-                              filtered,
-                              sortBySprint[sprint.id] || 'status'
-                            )
-                            return sorted.length ? (
-                              <div className="overflow-x-auto">
-                                <table className="min-w-full text-left text-sm">
-                                  <thead className="text-xs uppercase text-slate-400 border-b border-slate-800/60">
-                                    <tr>
-                                      <th className="py-2 pr-4">Ticket</th>
-                                      <th className="py-2 pr-4">Summary</th>
-                                      <th className="py-2 pr-4">Status</th>
-                                      <th className="py-2 pr-4">SP</th>
-                                      <th className="py-2 pr-4">PRs</th>
-                                      <th className="py-2">Bounce</th>
+                            }
+                            return true
+                          })
+                          const sorted = sortTickets(
+                            filtered,
+                            sortBySprint[sprint.id] || 'status'
+                          )
+                          return sorted.length ? (
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full text-left text-sm">
+                                <thead className="text-xs uppercase text-slate-400 border-b border-slate-800/60">
+                                  <tr>
+                                    <th className="py-2 pr-4">Ticket</th>
+                                    <th className="py-2 pr-4">Summary</th>
+                                    <th className="py-2 pr-4">Status</th>
+                                    <th className="py-2 pr-4">SP</th>
+                                    <th className="py-2 pr-4">PRs</th>
+                                    <th className="py-2">Bounce</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                                  {sorted.map((ticket: any) => (
+                                    <tr key={ticket.id} className="align-top">
+                                      <td className="py-2 pr-4 font-mono text-slate-300">
+                                        {jiraBaseUrl ? (
+                                          <a
+                                            href={getJiraTicketUrl(ticket.jiraId)}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-blue-300 hover:text-blue-200"
+                                          >
+                                            {ticket.jiraId}
+                                          </a>
+                                        ) : (
+                                          ticket.jiraId
+                                        )}
+                                      </td>
+                                      <td className="py-2 pr-4 text-slate-100 max-w-[320px]">
+                                        <span className="block truncate" title={ticket.summary}>
+                                          {ticket.summary}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 pr-4 text-slate-300">
+                                        {ticket.status}
+                                      </td>
+                                      <td className="py-2 pr-4 text-slate-300">
+                                        {ticket.storyPoints ?? 0}
+                                      </td>
+                                      <td className="py-2 pr-4 text-slate-300">
+                                        {ticket.prCount ?? 0}
+                                      </td>
+                                      <td className="py-2 text-slate-300">
+                                        {ticket.qaBounceBackCount ?? 0}
+                                      </td>
                                     </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                                    {sorted.map((ticket: any) => (
-                                      <tr key={ticket.id} className="align-top">
-                                        <td className="py-2 pr-4 font-mono text-slate-300">
-                                          {jiraBaseUrl ? (
-                                            <a
-                                              href={getJiraTicketUrl(ticket.jiraId)}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              className="text-blue-300 hover:text-blue-200"
-                                            >
-                                              {ticket.jiraId}
-                                            </a>
-                                          ) : (
-                                            ticket.jiraId
-                                          )}
-                                        </td>
-                                        <td className="py-2 pr-4 text-slate-100 max-w-[320px]">
-                                          <span className="block truncate" title={ticket.summary}>
-                                            {ticket.summary}
-                                          </span>
-                                        </td>
-                                        <td className="py-2 pr-4 text-slate-300">
-                                          {ticket.status}
-                                        </td>
-                                        <td className="py-2 pr-4 text-slate-300">
-                                          {ticket.storyPoints ?? 0}
-                                        </td>
-                                        <td className="py-2 pr-4 text-slate-300">
-                                          {ticket.prCount ?? 0}
-                                        </td>
-                                        <td className="py-2 text-slate-300">
-                                          {ticket.qaBounceBackCount ?? 0}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            ) : (
-                              <div className="text-slate-400 text-sm">No tickets for this sprint.</div>
-                            )
-                          })()}
-                        </div>
-                      )}
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <div className="text-slate-400 text-sm">No tickets for this sprint.</div>
+                          )
+                        })()}
+                      </div>
                     </div>
 
                     <div className="flex flex-col gap-2">

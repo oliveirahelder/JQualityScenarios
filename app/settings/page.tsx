@@ -341,6 +341,7 @@ export default function SettingsPage() {
     }
   }
 
+
   const integrations = [
     {
       name: 'Jira Integration',

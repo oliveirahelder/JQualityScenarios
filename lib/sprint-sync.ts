@@ -8,6 +8,7 @@ import {
   resolveStoryPointsFieldId,
 } from '@/lib/jira-sprints'
 import type { JiraCredentials } from '@/lib/jira-config'
+import { ensureSprintSnapshot } from '@/lib/sprint-snapshot'
 
 /**
  * Sync active sprints from Jira to database
@@ -157,18 +158,19 @@ export async function syncRecentClosedSprints(credentials?: JiraCredentials) {
     for (const jiraSprint of closedSprints) {
       const normalized = normalizeSprint(jiraSprint)
 
-      await prisma.sprint.upsert({
+      const sprint = await prisma.sprint.upsert({
         where: { jiraId: normalized.jiraId },
-        update: { status: 'CLOSED' },
+        update: { status: 'COMPLETED' },
         create: {
           jiraId: normalized.jiraId,
           name: normalized.name,
           startDate: normalized.startDate,
           endDate: normalized.endDate,
-          status: 'CLOSED',
+          status: 'COMPLETED',
         },
       })
 
+      await ensureSprintSnapshot(sprint.id, credentials)
       console.log(`[Sprint Sync] Closed sprint updated: ${normalized.name}`)
     }
 

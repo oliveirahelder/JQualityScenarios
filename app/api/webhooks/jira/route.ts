@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { normalizeSprint, normalizeIssue } from '@/lib/jira-sprints'
+import { ensureSprintSnapshot } from '@/lib/sprint-snapshot'
 import { verifyJiraSignature, parseWebhookPayload } from '@/lib/webhook-utils'
 
 function getSprintFieldValue(issue: any) {
@@ -257,11 +258,12 @@ async function handleSprintClosed(body: any) {
     const sprint = body.sprint
     const normalized = normalizeSprint(sprint)
 
-    await prisma.sprint.update({
+    const updatedSprint = await prisma.sprint.update({
       where: { jiraId: normalized.jiraId },
-      data: { status: 'CLOSED' },
+      data: { status: 'COMPLETED' },
     })
 
+    await ensureSprintSnapshot(updatedSprint.id)
     console.log(`[JIRA Webhook] Sprint closed: ${sprint.name}`)
     return NextResponse.json({ ok: true })
   } catch (error) {

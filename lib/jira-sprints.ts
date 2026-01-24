@@ -396,10 +396,10 @@ export async function getRecentClosedSprints(
  * Normalize Jira sprint data to our database format
  */
 export function normalizeSprint(jiraSprint: JiraSprintEvent) {
-  const statusMap: Record<string, 'PLANNED' | 'ACTIVE' | 'CLOSED'> = {
+  const statusMap: Record<string, 'PLANNED' | 'ACTIVE' | 'COMPLETED'> = {
     'FUTURE': 'PLANNED',
     'ACTIVE': 'ACTIVE',
-    'CLOSED': 'CLOSED',
+    'CLOSED': 'COMPLETED',
   }
 
   return {
