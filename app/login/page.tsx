@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -84,7 +85,7 @@ export default function LoginPage() {
           </div>
           <div className="flex flex-col items-center gap-4">
             <div className="p-2.5 rounded-2xl bg-gradient-to-br from-slate-900/90 to-slate-800/80 border border-slate-700/80 shadow-glow-blue">
-              <img src="/logo.svg" alt="JQuality logo" className="w-20 h-20" />
+              <Image src="/logo.svg" alt="JQuality logo" width={80} height={80} />
             </div>
             <h1 className="text-4xl font-bold text-gradient mb-2">JQuality</h1>
           </div>
@@ -150,9 +151,9 @@ export default function LoginPage() {
                   <Lock className="w-4 h-4 text-blue-400" />
                   Password
                 </label>
-                <Input
-                  type="password"
-                  placeholder="••••••••"
+                  <Input
+                    type="password"
+                    placeholder="********"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -219,7 +220,7 @@ export default function LoginPage() {
 
         {/* Footer Info */}
         <div className="mt-8 text-center text-slate-500 text-xs">
-          <p>🔒 Your data is secure. We never share your information.</p>
+          <p>Security: Your data is secure. We never share your information.</p>
         </div>
       </div>
     </div>

@@ -5,6 +5,8 @@ let agileClient: AxiosInstance | null = null
 let agileClientKey = ''
 let coreClient: AxiosInstance | null = null
 let coreClientKey = ''
+let greenhopperClient: AxiosInstance | null = null
+let greenhopperClientKey = ''
 let storyPointsFieldCache: { key: string; fieldId: string | null } | null = null
 
 function buildAuthConfig(credentials?: JiraCredentials) {
@@ -76,6 +78,23 @@ function getCoreClient(credentials?: JiraCredentials): AxiosInstance {
   return coreClient
 }
 
+function getGreenhopperClient(credentials?: JiraCredentials): AxiosInstance {
+  const { baseUrl, requestTimeout, nextKey, headers, auth } = buildAuthConfig(credentials)
+  const nextGreenhopperKey = `${nextKey}|greenhopper`
+
+  if (!greenhopperClient || greenhopperClientKey !== nextGreenhopperKey) {
+    greenhopperClient = axios.create({
+      baseURL: `${baseUrl}/rest/greenhopper/1.0`,
+      auth,
+      headers,
+      timeout: requestTimeout,
+    })
+    greenhopperClientKey = nextGreenhopperKey
+  }
+
+  return greenhopperClient
+}
+
 function parseBoardIds(raw: string | undefined): number[] {
   if (!raw) return []
   return raw
@@ -111,7 +130,7 @@ export interface JiraSprintWithIssues extends JiraSprintEvent {
 export interface JiraIssue {
   id: string
   key: string
-  fields: {
+  fields: Record<string, unknown> & {
     summary: string
     description?: string
     status: {
@@ -127,11 +146,48 @@ export interface JiraIssue {
   }
 }
 
+type JiraField = {
+  id: string
+  name?: string
+  clauseNames?: string[]
+}
+
+type JiraChangelogItem = {
+  field?: string | null
+  fromString?: string | null
+  toString?: string | null
+}
+
+type JiraChangelogHistory = {
+  created: string
+  items?: JiraChangelogItem[]
+}
+
+type JiraChangelog = {
+  histories?: JiraChangelogHistory[]
+}
+
+type JiraSprintEventRaw = {
+  id?: number | string
+  name?: string
+  state?: string
+  status?: string
+  startDate?: string
+  endDate?: string
+  originBoardId?: number
+  boardId?: number
+}
+
+type JiraBoard = {
+  id: number
+  name?: string
+}
+
 function matchStatus(value: string, targets: string[]) {
   return targets.some((target) => value.includes(target))
 }
 
-function countQaBounceBacks(changelog: any): number {
+function countQaBounceBacks(changelog: JiraChangelog | undefined): number {
   const histories = changelog?.histories || []
   const qaStatuses = [
     'in qa',
@@ -174,17 +230,17 @@ export async function resolveStoryPointsFieldId(
   try {
     const response = await getCoreClient(credentials).get('/field')
     const fields = response.data || []
-    const normalized = fields.map((field: any) => ({
+    const normalized = (fields as JiraField[]).map((field) => ({
       id: field.id as string,
       name: (field.name || '').toLowerCase(),
-      clauseNames: (field.clauseNames || []).map((value: string) => value.toLowerCase()),
+      clauseNames: (field.clauseNames || []).map((value) => value.toLowerCase()),
     }))
 
-    const preferred = normalized.find((field: any) =>
+    const preferred = normalized.find((field) =>
       field.name.includes('story point')
     )
     const fallback = normalized.find(
-      (field: any) =>
+      (field) =>
         field.name === 'story points' ||
         field.name === 'story point estimate' ||
         field.name === 'estimate' ||
@@ -205,7 +261,7 @@ export async function getIssueChangelogMetrics(
   issueKey: string,
   credentials?: JiraCredentials,
   storyPointsFieldId?: string | null
-): Promise<{ storyPoints: number | null; qaBounceBackCount: number }> {
+): Promise<{ storyPoints: number | null; qaBounceBackCount: number; closedAt: Date | null }> {
   try {
     const fields = ['summary', 'status']
     if (storyPointsFieldId) {
@@ -231,10 +287,27 @@ export async function getIssueChangelogMetrics(
         : null
 
     const qaBounceBackCount = countQaBounceBacks(response.data?.changelog)
-    return { storyPoints, qaBounceBackCount }
+    const histories = (response.data?.changelog?.histories || []) as JiraChangelogHistory[]
+    const sorted = histories.sort(
+      (a, b) => new Date(a.created).getTime() - new Date(b.created).getTime()
+    )
+    let closedAt: Date | null = null
+    const closedStatuses = ['closed', 'done', 'resolved']
+    for (const history of sorted) {
+      for (const item of history.items || []) {
+        if (item.field !== 'status') continue
+        const toStatus = (item.toString || '').toLowerCase()
+        if (closedStatuses.some((status) => toStatus.includes(status))) {
+          closedAt = new Date(history.created)
+          break
+        }
+      }
+      if (closedAt) break
+    }
+    return { storyPoints, qaBounceBackCount, closedAt }
   } catch (error) {
     console.warn(`[Jira] Failed to load changelog for ${issueKey}:`, error)
-    return { storyPoints: null, qaBounceBackCount: 0 }
+    return { storyPoints: null, qaBounceBackCount: 0, closedAt: null }
   }
 }
 
@@ -273,7 +346,11 @@ export async function getActiveSprintsFromBoard(
       },
     })
 
-    return response.data.values || []
+    const values = (response.data.values || []) as JiraSprintEventRaw[]
+    return values.map((sprint) => ({
+      ...sprint,
+      boardId: sprint.originBoardId || sprint.boardId || boardId,
+    }))
   } catch (error) {
     const axiosError = error as AxiosError
     const errorMessage = axiosError.response?.data || axiosError.message || 'Unknown error'
@@ -308,7 +385,7 @@ export async function getSprintIssues(
 /**
  * Get all boards available
  */
-export async function getAllBoards(credentials?: JiraCredentials): Promise<any[]> {
+export async function getAllBoards(credentials?: JiraCredentials): Promise<JiraBoard[]> {
   try {
     const response = await getAgileClient(credentials).get('/board', {
       params: {
@@ -317,7 +394,7 @@ export async function getAllBoards(credentials?: JiraCredentials): Promise<any[]
       },
     })
 
-    return response.data.values || []
+    return (response.data.values || []) as JiraBoard[]
   } catch (error) {
     const axiosError = error as AxiosError
     const errorMessage = axiosError.response?.data || axiosError.message || 'Unknown error'
@@ -352,6 +429,124 @@ export async function getActiveSprints(
   } catch (error) {
     console.error('Error fetching active sprints:', error)
     throw error
+  }
+}
+
+export async function getClosedSprintsFromBoard(
+  boardId: number,
+  credentials?: JiraCredentials
+): Promise<JiraSprintEvent[]> {
+  try {
+    const results: JiraSprintEvent[] = []
+    let startAt = 0
+    const maxResults = 50
+    while (true) {
+      const response = await getAgileClient(credentials).get(`/board/${boardId}/sprint`, {
+        params: {
+          maxResults,
+          startAt,
+          state: 'closed',
+        },
+      })
+      const values = (response.data.values || []) as JiraSprintEventRaw[]
+      const mapped = values.map((sprint) => ({
+        ...sprint,
+        boardId: sprint.originBoardId || sprint.boardId || boardId,
+      }))
+      results.push(...mapped)
+      if (values.length < maxResults) break
+      startAt += maxResults
+    }
+    return results
+  } catch (error) {
+    const axiosError = error as AxiosError
+    const errorMessage = axiosError.response?.data || axiosError.message || 'Unknown error'
+    console.error(`Error fetching closed sprints from board ${boardId}:`, errorMessage)
+    throw new Error(`Failed to fetch closed Jira sprints for board ${boardId}: ${errorMessage}`)
+  }
+}
+
+export async function getSprintReport(
+  boardId: number,
+  sprintId: number,
+  credentials?: JiraCredentials
+): Promise<Record<string, unknown>> {
+  try {
+    const response = await getGreenhopperClient(credentials).get(
+      `/rapid/charts/sprintreport`,
+      {
+        params: {
+          rapidViewId: boardId,
+          sprintId,
+        },
+      }
+    )
+    return response.data as Record<string, unknown>
+  } catch (error) {
+    const axiosError = error as AxiosError
+    const errorMessage = axiosError.response?.data || axiosError.message || 'Unknown error'
+    console.error(`Error fetching sprint report ${sprintId}:`, errorMessage)
+    throw new Error(`Failed to fetch Jira sprint report for ${sprintId}: ${errorMessage}`)
+  }
+}
+
+export async function getAllClosedSprints(
+  credentials?: JiraCredentials
+): Promise<JiraSprintEvent[]> {
+  try {
+    const boardIds = await getTargetBoardIds(credentials)
+    const allClosed: JiraSprintEvent[] = []
+    for (const boardId of boardIds) {
+      const closed = await getClosedSprintsFromBoard(boardId, credentials)
+      if (closed.length > 0) {
+        allClosed.push(...closed)
+        continue
+      }
+
+      const legacyClosed = await getClosedSprintsFromGreenhopper(boardId, credentials)
+      allClosed.push(...legacyClosed)
+    }
+    return allClosed
+  } catch (error) {
+    console.error('Error fetching closed sprints:', error)
+    throw error
+  }
+}
+
+async function getClosedSprintsFromGreenhopper(
+  boardId: number,
+  credentials?: JiraCredentials
+): Promise<JiraSprintEvent[]> {
+  try {
+    const response = await getGreenhopperClient(credentials).get(
+      `/rapidview/${boardId}/sprintquery`,
+      {
+        params: {
+          includeHistoricSprints: true,
+          includeFutureSprints: false,
+        },
+      }
+    )
+    const raw = response.data?.sprints || response.data?.values || []
+    const sprints = Array.isArray(raw) ? raw : []
+    return sprints
+      .filter((sprint: JiraSprintEventRaw) => {
+        const state = (sprint.state || sprint.status || '').toUpperCase()
+        return state === 'CLOSED' || state === 'COMPLETE' || state === 'COMPLETED'
+      })
+      .map((sprint: JiraSprintEventRaw) => ({
+        id: Number(sprint.id),
+        name: sprint.name || `Sprint ${sprint.id}`,
+        state: 'CLOSED',
+        startDate: sprint.startDate || undefined,
+        endDate: sprint.endDate || undefined,
+        boardId,
+      }))
+  } catch (error) {
+    const axiosError = error as AxiosError
+    const errorMessage = axiosError.response?.data || axiosError.message || 'Unknown error'
+    console.error(`Error fetching greenhopper sprints for board ${boardId}:`, errorMessage)
+    throw new Error(`Failed to fetch Jira sprint reports for board ${boardId}: ${errorMessage}`)
   }
 }
 

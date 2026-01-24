@@ -97,9 +97,9 @@ export function verifyConfluenceSignature(
 /**
  * Parse and validate webhook payload as JSON
  */
-export function parseWebhookPayload(body: string): Record<string, any> | null {
+export function parseWebhookPayload(body: string): Record<string, unknown> | null {
   try {
-    return JSON.parse(body)
+    return JSON.parse(body) as Record<string, unknown>
   } catch (error) {
     console.error('[Webhook] Failed to parse JSON payload:', error)
     return null
@@ -109,7 +109,7 @@ export function parseWebhookPayload(body: string): Record<string, any> | null {
 /**
  * Extract common metadata from webhook event
  */
-export function extractWebhookMetadata(payload: Record<string, any>): {
+export function extractWebhookMetadata(payload: Record<string, unknown>): {
   eventType: string
   source: string
   timestamp: Date
@@ -120,31 +120,42 @@ export function extractWebhookMetadata(payload: Record<string, any>): {
   let source = 'unknown'
   let actor = undefined
 
-  if (payload.webhookEvent) {
+  const data = payload as {
+    webhookEvent?: string
+    user?: { displayName?: string; emailAddress?: string }
+    action?: string
+    pull_request?: { user?: { login?: string } }
+    issue?: { user?: { login?: string } }
+    ref?: string
+    pusher?: { name?: string }
+    page?: { version?: { message?: string; by?: { displayName?: string } } }
+  }
+
+  if (data.webhookEvent) {
     // Jira format
-    eventType = payload.webhookEvent
+    eventType = data.webhookEvent
     source = 'jira'
-    actor = payload.user?.displayName || payload.user?.emailAddress
-  } else if (payload.action && payload.pull_request) {
+    actor = data.user?.displayName || data.user?.emailAddress
+  } else if (data.action && data.pull_request) {
     // GitHub PR format
-    eventType = `pull_request.${payload.action}`
+    eventType = `pull_request.${data.action}`
     source = 'github'
-    actor = payload.pull_request.user?.login
-  } else if (payload.action && payload.issue) {
+    actor = data.pull_request.user?.login
+  } else if (data.action && data.issue) {
     // GitHub issue format
-    eventType = `issue.${payload.action}`
+    eventType = `issue.${data.action}`
     source = 'github'
-    actor = payload.issue.user?.login
-  } else if (payload.ref) {
+    actor = data.issue.user?.login
+  } else if (data.ref) {
     // GitHub push format
     eventType = 'push'
     source = 'github'
-    actor = payload.pusher?.name
-  } else if (payload.page) {
+    actor = data.pusher?.name
+  } else if (data.page) {
     // Confluence page update format
-    eventType = payload.page.version.message ? 'page_updated' : 'page_created'
+    eventType = data.page.version?.message ? 'page_updated' : 'page_created'
     source = 'confluence'
-    actor = payload.page.version.by?.displayName
+    actor = data.page.version?.by?.displayName
   }
 
   return {

@@ -2,10 +2,41 @@ import { prisma } from '@/lib/prisma'
 import type { JiraCredentials } from '@/lib/jira-config'
 
 const CLOSED_STATUSES = ['closed', 'done', 'resolved']
+const QA_DONE_STATUSES = [
+  'ready for release',
+  'waiting for approval',
+  'awaiting approval',
+  'in release',
+]
 const DEV_STATUSES = ['in progress', 'in development', 'in refinement']
+
+type JiraChangelogHistory = {
+  created: string
+  items?: Array<{
+    field?: string | null
+    toString?: string | null
+  }>
+}
+
+type SprintTicket = {
+  jiraId: string
+  summary: string
+  status: string
+  assignee?: string | null
+  priority?: string | null
+  storyPoints?: number | null
+  qaBounceBackCount?: number | null
+  prCount?: number | null
+  grossTime?: number | null
+  updatedAt: Date
+}
 
 function isClosed(status: string | null | undefined) {
   return CLOSED_STATUSES.some((value) => (status || '').toLowerCase().includes(value))
+}
+
+function isQaDone(status: string | null | undefined) {
+  return QA_DONE_STATUSES.some((value) => (status || '').toLowerCase().includes(value))
 }
 
 function isBusinessDay(date: Date) {
@@ -39,7 +70,7 @@ function buildJiraHeaders(credentials: JiraCredentials) {
   return { Authorization: `Basic ${basicToken}` }
 }
 
-async function getTicketWorkHours(
+async function getTicketWorkWindow(
   issueKey: string,
   credentials: JiraCredentials,
   devStatuses: string[],
@@ -55,9 +86,9 @@ async function getTicketWorkHours(
     })
     if (!response.ok) return null
     const data = await response.json()
-    const histories = data?.changelog?.histories || []
+    const histories = (data?.changelog?.histories || []) as JiraChangelogHistory[]
     const sorted = histories.sort(
-      (a: any, b: any) => new Date(a.created).getTime() - new Date(b.created).getTime()
+      (a, b) => new Date(a.created).getTime() - new Date(b.created).getTime()
     )
 
     let devStart: Date | null = null
@@ -78,24 +109,31 @@ async function getTicketWorkHours(
       if (closedAt) break
     }
 
-    if (!devStart || !closedAt) return null
-    return { workHours: businessHoursBetween(devStart, closedAt) }
+    if (!devStart || !closedAt) return { devStart: null, closedAt: null, workHours: null }
+    return {
+      devStart,
+      closedAt,
+      workHours: businessHoursBetween(devStart, closedAt),
+    }
   } catch {
-    return null
+    return { devStart: null, closedAt: null, workHours: null }
   }
 }
 
 export async function ensureSprintSnapshot(
   sprintId: string,
-  credentials?: JiraCredentials | null
+  credentials?: JiraCredentials | null,
+  totalsOverride?: Partial<{
+    plannedTickets: number
+    finishedTickets: number
+    qaDoneTickets: number
+    storyPointsTotal: number
+    storyPointsClosed: number
+  }>
 ) {
   const existing = await prisma.sprintSnapshot.findUnique({
     where: { sprintId },
   })
-  const shouldUpdateTimes =
-    !!credentials && (!existing?.deliveryTimes || !existing?.ticketTimes)
-  if (existing && !shouldUpdateTimes) return existing
-
   const sprint = await prisma.sprint.findUnique({
     where: { id: sprintId },
     include: { tickets: true },
@@ -109,26 +147,37 @@ export async function ensureSprintSnapshot(
   const closedTickets =
     typeof sprint.closedTickets === 'number' && sprint.closedTickets >= 0
       ? sprint.closedTickets
-      : sprint.tickets.filter((ticket) => isClosed(ticket.status)).length
+      : sprint.tickets.filter((ticket: { status?: string | null }) => isClosed(ticket.status))
+          .length
   const storyPointsTotal =
     sprint.storyPointsTotal > 0
       ? sprint.storyPointsTotal
-      : sprint.tickets.reduce((sum, ticket) => sum + (ticket.storyPoints || 0), 0)
-  const storyPointsClosed = sprint.tickets.reduce((sum, ticket) => {
-    return sum + (isClosed(ticket.status) ? ticket.storyPoints || 0 : 0)
-  }, 0)
-  const bounceBackTickets = sprint.tickets.filter(
-    (ticket) => (ticket.qaBounceBackCount || 0) > 0
+      : sprint.tickets.reduce(
+          (sum: number, ticket: { storyPoints?: number | null }) => sum + (ticket.storyPoints || 0),
+          0
+        )
+  const storyPointsClosed = sprint.tickets.reduce(
+    (sum: number, ticket: { status?: string | null; storyPoints?: number | null }) => {
+      return sum + (isClosed(ticket.status) ? ticket.storyPoints || 0 : 0)
+    },
+    0
+  )
+  const qaDoneTickets = sprint.tickets.filter(
+    (ticket: { status?: string | null }) => isQaDone(ticket.status)
   ).length
-  const successPercent = totalTickets
-    ? Math.round((closedTickets / totalTickets) * 1000) / 10
-    : 0
+  const bounceBackTickets = sprint.tickets.filter(
+    (ticket: { qaBounceBackCount?: number | null }) => (ticket.qaBounceBackCount || 0) > 0
+  ).length
 
   const assigneeTotals = new Map<
     string,
     { tickets: number; closed: number; storyPoints: number; closedPoints: number }
   >()
-  for (const ticket of sprint.tickets) {
+  for (const ticket of sprint.tickets as Array<{
+    assignee?: string | null
+    storyPoints?: number | null
+    status?: string | null
+  }>) {
     const name = (ticket.assignee || '').trim() || 'Unassigned'
     const entry = assigneeTotals.get(name) || {
       tickets: 0,
@@ -145,7 +194,7 @@ export async function ensureSprintSnapshot(
     assigneeTotals.set(name, entry)
   }
 
-  const tickets = sprint.tickets.map((ticket) => ({
+  const tickets = sprint.tickets.map((ticket: SprintTicket) => ({
     jiraId: ticket.jiraId,
     summary: ticket.summary,
     status: ticket.status,
@@ -173,6 +222,7 @@ export async function ensureSprintSnapshot(
     assignee: string | null
     workHours: number
   }> | null = null
+  let workedTickets: number | null = null
   let deliveryTimes: Array<{
     name: string
     totalHours: number
@@ -186,15 +236,22 @@ export async function ensureSprintSnapshot(
       { totalHours: number; ticketCount: number }
     >()
     ticketTimes = []
-    for (const ticket of sprint.tickets) {
+    workedTickets = 0
+    for (const ticket of sprint.tickets as Array<{
+      jiraId: string
+      assignee?: string | null
+    }>) {
       if (!ticket.jiraId) continue
-      const timing = await getTicketWorkHours(
+      const timing = await getTicketWorkWindow(
         ticket.jiraId,
         credentials,
         DEV_STATUSES,
         CLOSED_STATUSES
       )
-      if (!timing) continue
+      if (!timing?.devStart || !timing?.closedAt || timing.workHours == null) continue
+      if (timing.devStart >= sprint.startDate && timing.closedAt <= sprint.endDate) {
+        workedTickets += 1
+      }
       const assignee = (ticket.assignee || '').trim()
       ticketTimes.push({
         jiraId: ticket.jiraId,
@@ -226,13 +283,22 @@ export async function ensureSprintSnapshot(
       .sort((a, b) => b.ticketCount - a.ticketCount || a.name.localeCompare(b.name))
   }
 
+  const plannedTickets = totalsOverride?.plannedTickets ?? totalTickets
+  const finishedTickets = totalsOverride?.finishedTickets ?? closedTickets
+  const qaDoneTotal = totalsOverride?.qaDoneTickets ?? qaDoneTickets
   const totalsPayload = {
-    totalTickets,
-    closedTickets,
-    storyPointsTotal,
-    storyPointsClosed,
+    totalTickets: plannedTickets,
+    closedTickets: finishedTickets,
+    plannedTickets,
+    finishedTickets,
+    qaDoneTickets: qaDoneTotal,
+    storyPointsTotal: totalsOverride?.storyPointsTotal ?? storyPointsTotal,
+    storyPointsClosed: totalsOverride?.storyPointsClosed ?? storyPointsClosed,
     bounceBackTickets,
-    successPercent,
+    successPercent: plannedTickets
+      ? Math.round((finishedTickets / plannedTickets) * 1000) / 10
+      : 0,
+    workedTickets: typeof workedTickets === 'number' ? workedTickets : undefined,
   }
 
   const ticketsPayload = tickets
@@ -244,6 +310,9 @@ export async function ensureSprintSnapshot(
     return prisma.sprintSnapshot.update({
       where: { id: existing.id },
       data: {
+        totals: JSON.stringify(totalsPayload),
+        tickets: JSON.stringify(ticketsPayload),
+        assignees: JSON.stringify(assigneesPayload),
         deliveryTimes:
           deliveryTimesPayload != null
             ? JSON.stringify(deliveryTimesPayload)

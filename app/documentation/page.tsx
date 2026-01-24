@@ -6,6 +6,18 @@ import { Button } from '@/components/ui/button'
 import { BookOpen, Plus, ExternalLink, Zap, Search } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 
+type DocumentationDraft = {
+  id: string
+  title: string
+  status: string
+  content?: string | null
+  createdAt: string
+  ticket?: { jiraId?: string | null } | null
+  sprint?: { name: string } | null
+  confluencePageId?: string | null
+  confluenceUrl?: string | null
+}
+
 const statusColors = {
   DRAFT: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
   UNDER_REVIEW: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
@@ -15,9 +27,9 @@ const statusColors = {
 }
 
 export default function DocumentationPage() {
-  const [drafts, setDrafts] = useState<any[]>([])
+  const [drafts, setDrafts] = useState<DocumentationDraft[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedDraft, setSelectedDraft] = useState<any>(null)
+  const [selectedDraft, setSelectedDraft] = useState<DocumentationDraft | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filterStatus, setFilterStatus] = useState<string | null>(null)
 

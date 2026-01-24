@@ -241,7 +241,7 @@ export default function SearchPage() {
               <CardContent className="py-12 text-center">
                 <AlertCircle className="w-12 h-12 text-slate-600 mx-auto mb-4 opacity-50" />
                 <p className="text-slate-400">
-                  No results found for "<span className="font-semibold">{query}</span>". Try a different search term.
+                  No results found for &quot;<span className="font-semibold">{query}</span>&quot;. Try a different search term.
                 </p>
               </CardContent>
             </Card>

@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { Menu, X, LogOut, Settings, AlertTriangle, CheckCircle2 } from 'lucide-react'
@@ -81,11 +82,11 @@ export default function Navbar() {
   }, [])
 
   const navLinks = [
-    { href: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { href: '/sprints', label: 'Sprints', icon: '🏃' },
-    { href: '/scenarios', label: 'Scenarios', icon: '🎯' },
-    { href: '/documentation', label: 'Docs', icon: '📚' },
-    { href: '/search', label: 'Search', icon: '🔍' },
+    { href: '/dashboard', label: 'Dashboard', icon: 'D' },
+    { href: '/sprints', label: 'Sprints', icon: 'S' },
+    { href: '/scenarios', label: 'Scenarios', icon: 'C' },
+    { href: '/documentation', label: 'Docs', icon: 'Docs' },
+    { href: '/search', label: 'Search', icon: 'Q' },
   ]
   const adminLinks = [
     { href: '/reports', label: 'Reports', icon: 'R' },
@@ -106,7 +107,7 @@ export default function Navbar() {
             {/* Logo */}
             <Link href="/dashboard" className="flex items-center gap-3 group">
               <div className="p-3 bg-gradient-to-br from-slate-900/90 to-slate-800/80 rounded-2xl group-hover:shadow-glow-blue transition-all duration-300 border border-slate-700/80">
-                <img src="/logo.svg" alt="JQuality logo" className="w-14 h-14" />
+                <Image src="/logo.svg" alt="JQuality logo" width={56} height={56} />
               </div>
               <div className="hidden sm:flex flex-col">
                 <span className="text-lg font-bold text-white">JQuality</span>
@@ -126,7 +127,7 @@ export default function Navbar() {
                         : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
                     }`}
                   >
-                    <span className="mr-1.5">{link.icon}</span>
+                    {link.icon ? <span className="mr-1.5">{link.icon}</span> : null}
                     {link.label}
                   </Button>
                 </Link>
@@ -141,7 +142,7 @@ export default function Navbar() {
                         : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
                     }`}
                   >
-                    <span className="mr-1.5">{link.icon}</span>
+                    {link.icon ? <span className="mr-1.5">{link.icon}</span> : null}
                     {link.label}
                   </Button>
                 </Link>
@@ -218,7 +219,7 @@ export default function Navbar() {
                         : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
                     }`}
                   >
-                    <span className="mr-2">{link.icon}</span>
+                    {link.icon ? <span className="mr-2">{link.icon}</span> : null}
                     {link.label}
                   </Button>
                 </Link>
@@ -237,7 +238,7 @@ export default function Navbar() {
                         : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
                     }`}
                   >
-                    <span className="mr-2">{link.icon}</span>
+                    {link.icon ? <span className="mr-2">{link.icon}</span> : null}
                     {link.label}
                   </Button>
                 </Link>
@@ -248,7 +249,7 @@ export default function Navbar() {
                     variant="ghost"
                     className="w-full justify-start transition-all duration-200 text-slate-300 hover:text-white hover:bg-slate-800/50"
                   >
-                    <span className="mr-2">⚙️</span>
+                    <Settings className="w-4 h-4 mr-2" />
                     Settings
                   </Button>
                 </Link>
@@ -278,3 +279,4 @@ function getRoleLabel(role: string | null) {
       return role || ''
   }
 }
+

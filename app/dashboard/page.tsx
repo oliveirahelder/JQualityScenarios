@@ -13,8 +13,47 @@ import {
   User,
 } from 'lucide-react'
 
+type MetricValueCell =
+  | string
+  | number
+  | { value: string | number; href: string }
+
+type MetricRowSimple = {
+  label: string
+  value: string | number
+  href?: string
+}
+
+type MetricRowColumns = {
+  label: string
+  columns: MetricValueCell[]
+}
+
+type MetricRowGroup = {
+  label: string
+  columns: string[]
+  rows: MetricValueCell[][]
+}
+
+type MetricRow = MetricRowSimple | MetricRowColumns | MetricRowGroup
+
+type MetricCard = {
+  title: string
+  value: string | number
+  subtitle?: string
+  icon: React.ComponentType<{ className?: string }>
+  color: string
+  trend?: string
+  href?: string
+  filter?: React.ReactNode
+  columns?: string[]
+  rows?: MetricRow[]
+  loading?: boolean
+}
+
 export default function Dashboard() {
   const [metricsLoading, setMetricsLoading] = useState(true)
+  const [deliveryLoading, setDeliveryLoading] = useState(false)
   const [metricValues, setMetricValues] = useState({
     activeSprintCount: null as number | null,
     activeSprints: [] as Array<{
@@ -49,6 +88,9 @@ export default function Dashboard() {
       ticketCount: number
       averageHours: number
       totalHours: number
+      avgStoryPointsAllocated?: number
+      avgStoryPointsClosed?: number
+      storyPointSprintCount?: number
     }>,
     deliveryTimesBySprint: [] as Array<{
       sprintId: string
@@ -58,6 +100,11 @@ export default function Dashboard() {
         ticketCount: number
         averageHours: number
         totalHours: number
+        carryoverCount?: number
+        carryoverRate?: number
+        avgStoryPointsAllocated?: number
+        avgStoryPointsClosed?: number
+        storyPointSprintCount?: number
       }>
     }>,
   })
@@ -66,7 +113,7 @@ export default function Dashboard() {
     const loadMetrics = async () => {
       try {
         const authToken = localStorage.getItem('token')
-        const response = await fetch('/api/metrics/jira', {
+        const response = await fetch('/api/metrics/jira?includeDeliveryTimes=0', {
           headers: { Authorization: `Bearer ${authToken}` },
         })
         if (!response.ok) {
@@ -92,7 +139,30 @@ export default function Dashboard() {
       }
     }
 
-    loadMetrics()
+    const loadDeliveryTimes = async () => {
+      try {
+        setDeliveryLoading(true)
+        const authToken = localStorage.getItem('token')
+        const response = await fetch('/api/metrics/jira?includeDeliveryTimes=1', {
+          headers: { Authorization: `Bearer ${authToken}` },
+        })
+        if (!response.ok) {
+          return
+        }
+        const data = await response.json()
+        setMetricValues((prev) => ({
+          ...prev,
+          deliveryTimes: data.deliveryTimes || [],
+          deliveryTimesBySprint: data.deliveryTimesBySprint || [],
+        }))
+      } catch {
+        // Keep current delivery times on error
+      } finally {
+        setDeliveryLoading(false)
+      }
+    }
+
+    loadMetrics().then(loadDeliveryTimes)
   }, [])
 
   const totalDevTickets = metricValues.activeSprints.reduce(
@@ -131,7 +201,7 @@ export default function Dashboard() {
       icon: BarChart3,
       color: 'from-blue-600 to-blue-500',
       trend: metricsLoading ? '...' : '',
-      href: '/sprints',
+      href: '/sprints?filter=active',
       rows: metricValues.activeSprints.map((sprint) => ({
         label: sprint.name,
         value: `${sprint.successPercent}% | ${sprint.daysLeft}d`,
@@ -163,9 +233,9 @@ export default function Dashboard() {
       })),
     },
     {
-      title: 'Tickets Closed',
+      title: 'Tickets Finished',
       value: metricsLoading ? '--' : totalClosedTickets,
-      subtitle: 'Closed per sprint',
+      subtitle: 'Finished per sprint',
       icon: CheckCircle2,
       color: 'from-green-600 to-green-500',
       trend: metricsLoading ? '...' : '',
@@ -271,11 +341,12 @@ export default function Dashboard() {
 
   const deliveryTimeMetric = {
     title: 'Delivery Time',
-    value: metricsLoading ? '--' : selectedDeliveryEntries.length,
+    value: metricsLoading || deliveryLoading ? '--' : selectedDeliveryEntries.length,
     subtitle: 'Average business hours per ticket',
     icon: Zap,
     color: 'from-sky-600 to-sky-500',
-    trend: metricsLoading ? '...' : '',
+    trend: metricsLoading || deliveryLoading ? '...' : '',
+    loading: deliveryLoading,
     filter: (
       <div className="flex items-center justify-between gap-3 text-xs">
         <span className="text-slate-400">Sprint</span>
@@ -293,19 +364,21 @@ export default function Dashboard() {
         </select>
       </div>
     ),
-    columns: ['Assignee', 'Tickets', 'Avg Hours', 'Total Hours'],
+    columns: ['Assignee', 'Tickets', 'Avg Hours', 'Avg SP (last 5)', 'Carryover'],
     rows: selectedDeliveryEntries.map((entry) => ({
       label: entry.name,
       columns: [
         entry.name,
         `${entry.ticketCount}`,
         `${entry.averageHours}h`,
-        `${entry.totalHours}h`,
+        `${entry.avgStoryPointsAllocated ?? 0} / ${entry.avgStoryPointsClosed ?? 0}`,
+        entry.carryoverRate != null ? `${entry.carryoverRate}%` : '--',
       ],
     })),
   }
 
-  const renderMetricCard = (metric: any, key: string) => {
+  const renderMetricCard = (metric: MetricCard, key: string) => {
+    const showSkeleton = metric.loading ?? metricsLoading
     const card = (
       <div className="glass-card rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all duration-300 animate-slideInUp">
         <div className={`h-1 bg-gradient-to-r ${metric.color}`}></div>
@@ -313,7 +386,11 @@ export default function Dashboard() {
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-slate-300 text-sm font-semibold mb-1">{metric.title}</p>
-              <h3 className="text-3xl font-bold text-white tracking-tight">{metric.value}</h3>
+              {showSkeleton ? (
+                <div className="h-8 w-24 rounded-md bg-slate-700/60 animate-pulse"></div>
+              ) : (
+                <h3 className="text-3xl font-bold text-white tracking-tight">{metric.value}</h3>
+              )}
             </div>
             <metric.icon className="w-7 h-7 text-slate-400 opacity-60 group-hover:opacity-100 transition-opacity" />
           </div>
@@ -324,7 +401,7 @@ export default function Dashboard() {
             </div>
           ) : null}
           {metric.filter ? <div className="mt-3">{metric.filter}</div> : null}
-          {metric.rows?.length ? (
+          {!showSkeleton && metric.rows?.length ? (
             <div className="mt-4 space-y-2 text-xs text-slate-300">
               {metric.columns ? (
                 <div
@@ -336,8 +413,8 @@ export default function Dashboard() {
                   ))}
                 </div>
               ) : null}
-              {metric.rows.map((row: any, index: number) => {
-                if (row.columns && row.rows) {
+              {metric.rows.map((row, index: number) => {
+                if ('rows' in row && row.rows) {
                   return (
                     <div
                       key={`${row.label}-${index}`}
@@ -352,7 +429,7 @@ export default function Dashboard() {
                         ))}
                       </div>
                       <div className="space-y-1">
-                        {row.rows.map((values: any[], rowIndex: number) => (
+                        {row.rows.map((values, rowIndex: number) => (
                           <div
                             key={`${row.label}-row-${rowIndex}`}
                             className="grid grid-cols-3 gap-2 rounded-md bg-slate-900/50 px-2 py-1 text-xs text-slate-100 text-center"
@@ -381,14 +458,14 @@ export default function Dashboard() {
                     </div>
                   )
                 }
-                if (metric.columns && row.columns) {
+                if (metric.columns && 'columns' in row) {
                   return (
                     <div
                       key={row.label}
                       className="grid gap-2 rounded-lg bg-slate-900/40 px-2.5 py-1.5 text-xs text-slate-100 text-center"
                       style={{ gridTemplateColumns: `repeat(${row.columns.length}, minmax(0, 1fr))` }}
                     >
-                      {row.columns.map((value: any, valueIndex: number) => {
+                      {row.columns.map((value, valueIndex: number) => {
                         const content =
                           typeof value === 'object' && value && value.href ? (
                             <Link href={value.href} className="text-blue-300 hover:text-blue-200">
@@ -409,14 +486,16 @@ export default function Dashboard() {
                 const rowContent = (
                   <div
                     className={`flex items-center justify-between gap-3 rounded-lg bg-slate-900/40 px-2.5 py-1.5 ${
-                      row.href ? 'hover:bg-slate-900/60 transition-colors' : ''
+                      'href' in row && row.href ? 'hover:bg-slate-900/60 transition-colors' : ''
                     }`}
                   >
                     <span className="truncate">{row.label}</span>
-                    <span className="text-slate-100 font-semibold">{row.value}</span>
+                    <span className="text-slate-100 font-semibold">
+                      {'value' in row ? row.value : ''}
+                    </span>
                   </div>
                 )
-                if (!row.href) {
+                if (!('href' in row) || !row.href) {
                   return <div key={row.label}>{rowContent}</div>
                 }
                 return (
@@ -482,7 +561,7 @@ export default function Dashboard() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8 animate-fadeIn">
           <h1 className="text-4xl font-bold text-white mb-2">Dashboard</h1>
-          <p className="text-slate-400">Welcome back! Here's your test intelligence overview.</p>
+          <p className="text-slate-400">Welcome back! Here&apos;s your test intelligence overview.</p>
         </div>
 
         <div className="mb-8">

@@ -5,7 +5,49 @@ import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
 import type { JiraCredentials } from '@/lib/jira-config'
 
 const CLOSED_STATUSES = ['closed', 'done', 'resolved']
+const QA_READY_STATUSES = [
+  'ready for release',
+  'waiting for approval',
+  'awaiting approval',
+  'in release',
+]
 const DEV_STATUSES = ['in progress', 'in development', 'in refinement']
+const END_STATUSES = [...QA_READY_STATUSES, ...CLOSED_STATUSES]
+
+const METRICS_CACHE_TTL_MS = 30_000
+const metricsCache = new Map<string, { timestamp: number; payload: unknown }>()
+
+type JiraTicketLite = {
+  status?: string | null
+  storyPoints?: number | null
+  qaBounceBackCount?: number | null
+  assignee?: string | null
+  jiraId?: string | null
+}
+
+type JiraChangelogHistory = {
+  created: string
+  items?: Array<{
+    field?: string | null
+    toString?: string | null
+    to?: string | null
+  }>
+}
+
+type SprintWithTickets = {
+  id: string
+  name: string
+  endDate: Date
+  status: string
+  totalTickets: number
+  closedTickets: number
+  storyPointsTotal: number
+  tickets: JiraTicketLite[]
+}
+
+function isStrictClosed(status?: string | null) {
+  return (status || '').toLowerCase().includes('closed')
+}
 
 function isBusinessDay(date: Date) {
   const day = date.getDay()
@@ -42,7 +84,7 @@ async function getTicketWorkHours(
   issueKey: string,
   credentials: JiraCredentials,
   devStatuses: string[],
-  closedStatuses: string[]
+  endStatuses: string[]
 ) {
   try {
     const url = `${credentials.baseUrl}/rest/api/2/issue/${issueKey}?expand=changelog&fields=status`
@@ -55,30 +97,44 @@ async function getTicketWorkHours(
     if (!response.ok) return null
     const data = await response.json()
     const histories = data?.changelog?.histories || []
-    const sorted = histories.sort(
-      (a: any, b: any) => new Date(a.created).getTime() - new Date(b.created).getTime()
+    const sorted = (histories as JiraChangelogHistory[]).sort(
+      (a, b) => new Date(a.created).getTime() - new Date(b.created).getTime()
     )
 
     let devStart: Date | null = null
-    let closedAt: Date | null = null
+    let endAt: Date | null = null
+    let assigneeAtStart: string | null = null
+    let currentAssignee: string | null = null
 
     for (const history of sorted) {
       for (const item of history.items || []) {
+        if (item.field === 'assignee') {
+          const assignee = (item.toString || item.to || '').toString().trim()
+          if (assignee) {
+            currentAssignee = assignee
+          }
+        }
         if (item.field !== 'status') continue
         const toStatus = (item.toString || '').toLowerCase()
         if (!devStart && devStatuses.some((status) => toStatus.includes(status))) {
           devStart = new Date(history.created)
+          assigneeAtStart = currentAssignee
         }
-        if (devStart && closedStatuses.some((status) => toStatus.includes(status))) {
-          closedAt = new Date(history.created)
+        if (devStart && endStatuses.some((status) => toStatus.includes(status))) {
+          endAt = new Date(history.created)
           break
         }
       }
-      if (closedAt) break
+      if (endAt) break
     }
 
-    if (!devStart || !closedAt) return null
-    return { workHours: businessHoursBetween(devStart, closedAt) }
+    if (!devStart || !endAt) return null
+    return {
+      workHours: businessHoursBetween(devStart, endAt),
+      devStart,
+      endAt,
+      assigneeAtStart,
+    }
   } catch {
     return null
   }
@@ -86,6 +142,10 @@ async function getTicketWorkHours(
 
 export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url)
+    const includeDeliveryTimes =
+      searchParams.get('includeDeliveryTimes') !== '0' &&
+      searchParams.get('includeDeliveryTimes') !== 'false'
     const token = extractTokenFromHeader(request.headers.get('authorization'))
     if (!token) {
       return NextResponse.json({ error: 'Missing authentication token' }, { status: 401 })
@@ -108,14 +168,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Jira integration not configured' }, { status: 400 })
     }
 
-    const activeSprints = await prisma.sprint.findMany({
+    const cacheKey = `${payload.userId}|${includeDeliveryTimes ? 'delivery' : 'lite'}`
+    const cached = metricsCache.get(cacheKey)
+    if (cached && Date.now() - cached.timestamp < METRICS_CACHE_TTL_MS) {
+      return NextResponse.json(cached.payload)
+    }
+
+    const activeSprints = (await prisma.sprint.findMany({
       where: { status: 'ACTIVE' },
       include: { tickets: true },
       orderBy: { endDate: 'asc' },
-    })
+    })) as SprintWithTickets[]
 
     const now = new Date()
-    const activeSprintMetrics = activeSprints.map((sprint) => {
+    const activeSprintMetrics = activeSprints.map((sprint: SprintWithTickets) => {
       const totalTickets =
         typeof sprint.totalTickets === 'number' && sprint.totalTickets > 0
           ? sprint.totalTickets
@@ -123,26 +189,23 @@ export async function GET(request: NextRequest) {
       const closedTickets =
         typeof sprint.closedTickets === 'number' && sprint.closedTickets >= 0
           ? sprint.closedTickets
-          : sprint.tickets.filter((ticket) =>
-              CLOSED_STATUSES.some((status) =>
-                (ticket.status || '').toLowerCase().includes(status)
-              )
-            ).length
+          : sprint.tickets.filter((ticket: JiraTicketLite) => isStrictClosed(ticket.status)).length
       const successPercent = totalTickets
         ? Math.round((closedTickets / totalTickets) * 1000) / 10
         : 0
-      const devTickets = sprint.tickets.filter((ticket) =>
+      const devTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
         DEV_STATUSES.some((status) =>
           (ticket.status || '').toLowerCase().includes(status)
         )
       ).length
-      const doneTickets = sprint.tickets.filter((ticket) =>
-        CLOSED_STATUSES.some((status) =>
+      const doneTickets = closedTickets
+      const qaReadyTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
+        QA_READY_STATUSES.some((status) =>
           (ticket.status || '').toLowerCase().includes(status)
         )
       ).length
       const bounceBackTickets = sprint.tickets.filter(
-        (ticket) => (ticket.qaBounceBackCount || 0) > 0
+        (ticket: JiraTicketLite) => (ticket.qaBounceBackCount || 0) > 0
       ).length
       const bounceBackPercent = totalTickets
         ? Math.round((bounceBackTickets / totalTickets) * 1000) / 10
@@ -150,12 +213,12 @@ export async function GET(request: NextRequest) {
       const storyPointsTotal =
         sprint.storyPointsTotal > 0
           ? sprint.storyPointsTotal
-          : sprint.tickets.reduce((sum, ticket) => sum + (ticket.storyPoints || 0), 0)
-      const storyPointsCompleted = sprint.tickets.reduce((sum, ticket) => {
-        const isClosed = CLOSED_STATUSES.some((status) =>
-          (ticket.status || '').toLowerCase().includes(status)
-        )
-        return sum + (isClosed ? ticket.storyPoints || 0 : 0)
+          : sprint.tickets.reduce(
+              (sum: number, ticket: JiraTicketLite) => sum + (ticket.storyPoints || 0),
+              0
+            )
+      const storyPointsCompleted = sprint.tickets.reduce((sum: number, ticket: JiraTicketLite) => {
+        return sum + (isStrictClosed(ticket.status) ? ticket.storyPoints || 0 : 0)
       }, 0)
       const daysLeft = Math.max(
         0,
@@ -169,9 +232,7 @@ export async function GET(request: NextRequest) {
         const points = ticket.storyPoints || 0
         const entry = assigneeTotals.get(name) || { total: 0, closed: 0 }
         entry.total += points
-        const isClosed = CLOSED_STATUSES.some((status) =>
-          (ticket.status || '').toLowerCase().includes(status)
-        )
+        const isClosed = isStrictClosed(ticket.status)
         if (isClosed) {
           entry.closed += points
         }
@@ -193,6 +254,7 @@ export async function GET(request: NextRequest) {
         daysLeft,
         devTickets,
         doneTickets,
+        qaReadyTickets,
         bounceBackPercent,
         bounceBackTickets,
         storyPointsTotal,
@@ -204,7 +266,7 @@ export async function GET(request: NextRequest) {
     })
 
     const currentStoryPoints = activeSprintMetrics.reduce(
-      (sum, sprint) => sum + sprint.storyPointsTotal,
+      (sum: number, sprint: { storyPointsTotal: number }) => sum + sprint.storyPointsTotal,
       0
     )
     const assigneeCounts = new Map<
@@ -221,11 +283,7 @@ export async function GET(request: NextRequest) {
           inProgress: 0,
         }
         entry.total += 1
-        if (
-          CLOSED_STATUSES.some((status) =>
-            (ticket.status || '').toLowerCase().includes(status)
-          )
-        ) {
+        if (isStrictClosed(ticket.status)) {
           entry.closed += 1
         }
         if (
@@ -262,51 +320,72 @@ export async function GET(request: NextRequest) {
       }>
     }> = []
 
-    for (const sprint of activeSprints) {
-      const sprintHours = new Map<string, { totalHours: number; ticketCount: number }>()
-      for (const ticket of sprint.tickets || []) {
-        if (!ticket.jiraId || !ticket.assignee) continue
-        const timing = await getTicketWorkHours(
-          ticket.jiraId,
-          jiraCredentials,
-          DEV_STATUSES,
-          CLOSED_STATUSES
-        )
-        if (!timing) continue
-        const sprintEntry = sprintHours.get(ticket.assignee) || {
-          totalHours: 0,
-          ticketCount: 0,
-        }
-        sprintEntry.totalHours += timing.workHours
-        sprintEntry.ticketCount += 1
-        sprintHours.set(ticket.assignee, sprintEntry)
+    if (includeDeliveryTimes) {
+      for (const sprint of activeSprints) {
+        const sprintHours = new Map<
+          string,
+          { totalHours: number; ticketCount: number; startedCount: number; endedInSprintCount: number }
+        >()
+        for (const ticket of sprint.tickets || []) {
+          if (!ticket.jiraId || !ticket.assignee) continue
+          const timing = await getTicketWorkHours(
+            ticket.jiraId,
+            jiraCredentials,
+            DEV_STATUSES,
+            END_STATUSES
+          )
+          if (!timing) continue
+          const assigneeName = timing.assigneeAtStart || ticket.assignee
+          const sprintEntry = sprintHours.get(assigneeName) || {
+            totalHours: 0,
+            ticketCount: 0,
+            startedCount: 0,
+            endedInSprintCount: 0,
+          }
+          const isStartedInSprint =
+            timing.devStart >= sprint.startDate && timing.devStart <= sprint.endDate
+          if (isStartedInSprint) {
+            sprintEntry.startedCount += 1
+            if (timing.endAt <= sprint.endDate) {
+              sprintEntry.endedInSprintCount += 1
+            }
+          }
+          sprintEntry.totalHours += timing.workHours
+          sprintEntry.ticketCount += 1
+          sprintHours.set(assigneeName, sprintEntry)
 
-        const overallEntry = workHoursByAssignee.get(ticket.assignee) || {
-          totalHours: 0,
-          ticketCount: 0,
+          const overallEntry = workHoursByAssignee.get(assigneeName) || {
+            totalHours: 0,
+            ticketCount: 0,
+          }
+          overallEntry.totalHours += timing.workHours
+          overallEntry.ticketCount += 1
+          workHoursByAssignee.set(assigneeName, overallEntry)
         }
-        overallEntry.totalHours += timing.workHours
-        overallEntry.ticketCount += 1
-        workHoursByAssignee.set(ticket.assignee, overallEntry)
+
+        const sprintEntries = Array.from(sprintHours.entries())
+          .map(([name, entry]) => ({
+            name,
+            totalHours: Math.round(entry.totalHours * 10) / 10,
+            averageHours:
+              entry.ticketCount > 0
+                ? Math.round((entry.totalHours / entry.ticketCount) * 10) / 10
+                : 0,
+            ticketCount: entry.ticketCount,
+            carryoverCount: Math.max(0, entry.startedCount - entry.endedInSprintCount),
+            carryoverRate:
+              entry.startedCount > 0
+                ? Math.round((1 - entry.endedInSprintCount / entry.startedCount) * 1000) / 10
+                : 0,
+          }))
+          .sort((a, b) => b.ticketCount - a.ticketCount || a.name.localeCompare(b.name))
+
+        deliveryTimesBySprint.push({
+          sprintId: sprint.id,
+          sprintName: sprint.name,
+          entries: sprintEntries,
+        })
       }
-
-      const sprintEntries = Array.from(sprintHours.entries())
-        .map(([name, entry]) => ({
-          name,
-          totalHours: Math.round(entry.totalHours * 10) / 10,
-          averageHours:
-            entry.ticketCount > 0
-              ? Math.round((entry.totalHours / entry.ticketCount) * 10) / 10
-              : 0,
-          ticketCount: entry.ticketCount,
-        }))
-        .sort((a, b) => b.ticketCount - a.ticketCount || a.name.localeCompare(b.name))
-
-      deliveryTimesBySprint.push({
-        sprintId: sprint.id,
-        sprintName: sprint.name,
-        entries: sprintEntries,
-      })
     }
     const deliveryTimes = Array.from(workHoursByAssignee.entries())
       .map(([name, entry]) => ({
@@ -319,19 +398,83 @@ export async function GET(request: NextRequest) {
         ticketCount: entry.ticketCount,
       }))
       .sort((a, b) => b.ticketCount - a.ticketCount || a.name.localeCompare(b.name))
-    const previousSprint = await prisma.sprint.findFirst({
+
+    const lastSprintSnapshots = await prisma.sprintSnapshot.findMany({
+      where: { status: { in: ['COMPLETED', 'CLOSED'] } },
+      orderBy: { endDate: 'desc' },
+      take: 5,
+    })
+
+    const storyPointAverages = new Map<string, { total: number; closed: number; sprintCount: number }>()
+    for (const snapshot of lastSprintSnapshots) {
+      const assignees = snapshot.assignees ? JSON.parse(snapshot.assignees) : []
+      if (!Array.isArray(assignees)) continue
+      for (const assignee of assignees as Array<{
+        name?: string
+        storyPoints?: number
+        closedPoints?: number
+      }>) {
+        const name = (assignee.name || '').trim()
+        if (!name) continue
+        const entry = storyPointAverages.get(name) || {
+          total: 0,
+          closed: 0,
+          sprintCount: 0,
+        }
+        entry.total += assignee.storyPoints || 0
+        entry.closed += assignee.closedPoints || 0
+        entry.sprintCount += 1
+        storyPointAverages.set(name, entry)
+      }
+    }
+
+    const storyPointAveragesList = Array.from(storyPointAverages.entries()).map(
+      ([name, entry]) => ({
+        name,
+        avgStoryPointsAllocated:
+          entry.sprintCount > 0 ? Math.round((entry.total / entry.sprintCount) * 10) / 10 : 0,
+        avgStoryPointsClosed:
+          entry.sprintCount > 0 ? Math.round((entry.closed / entry.sprintCount) * 10) / 10 : 0,
+        sprintCount: entry.sprintCount,
+      })
+    )
+
+    const storyPointAveragesMap = new Map(
+      storyPointAveragesList.map((entry) => [entry.name, entry])
+    )
+
+    const deliveryTimesWithPoints = deliveryTimes.map((entry) => ({
+      ...entry,
+      avgStoryPointsAllocated: storyPointAveragesMap.get(entry.name)?.avgStoryPointsAllocated ?? 0,
+      avgStoryPointsClosed: storyPointAveragesMap.get(entry.name)?.avgStoryPointsClosed ?? 0,
+      storyPointSprintCount: storyPointAveragesMap.get(entry.name)?.sprintCount ?? 0,
+    }))
+
+    const deliveryTimesBySprintWithPoints = deliveryTimesBySprint.map((sprint) => ({
+      ...sprint,
+      entries: sprint.entries.map((entry) => ({
+        ...entry,
+        avgStoryPointsAllocated: storyPointAveragesMap.get(entry.name)?.avgStoryPointsAllocated ?? 0,
+        avgStoryPointsClosed: storyPointAveragesMap.get(entry.name)?.avgStoryPointsClosed ?? 0,
+        storyPointSprintCount: storyPointAveragesMap.get(entry.name)?.sprintCount ?? 0,
+      })),
+    }))
+    const previousSprint = (await prisma.sprint.findFirst({
       where: { status: { in: ['CLOSED', 'COMPLETED'] } },
       include: { tickets: true },
       orderBy: { endDate: 'desc' },
-    })
+    })) as SprintWithTickets | null
     const previousStoryPoints = previousSprint
       ? previousSprint.storyPointsTotal > 0
         ? previousSprint.storyPointsTotal
-        : previousSprint.tickets.reduce((sum, ticket) => sum + (ticket.storyPoints || 0), 0)
+        : previousSprint.tickets.reduce(
+            (sum: number, ticket: JiraTicketLite) => sum + (ticket.storyPoints || 0),
+            0
+          )
       : 0
     const storyPointsDelta = currentStoryPoints - previousStoryPoints
 
-    return NextResponse.json({
+    const responsePayload = {
       activeSprintCount: activeSprintMetrics.length,
       activeSprints: activeSprintMetrics,
       storyPoints: {
@@ -340,9 +483,17 @@ export async function GET(request: NextRequest) {
         delta: storyPointsDelta,
       },
       assignees,
-      deliveryTimes,
-      deliveryTimesBySprint,
+      deliveryTimes: includeDeliveryTimes ? deliveryTimesWithPoints : [],
+      deliveryTimesBySprint: includeDeliveryTimes ? deliveryTimesBySprintWithPoints : [],
+      storyPointAverages: storyPointAveragesList,
+    }
+
+    metricsCache.set(cacheKey, {
+      timestamp: Date.now(),
+      payload: responsePayload,
     })
+
+    return NextResponse.json(responsePayload)
   } catch (error) {
     console.error('[Metrics] Jira metrics error:', error)
     return NextResponse.json(

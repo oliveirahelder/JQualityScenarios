@@ -50,6 +50,11 @@ export async function fetchJiraTicket(
 
     const issue = response.data
 
+    type JiraComment = {
+      body?: { content?: Array<{ content?: Array<{ text?: string }> }> }
+    }
+    type JiraIssueLink = { outwardIssue?: { key?: string } }
+
     return {
       id: issue.key,
       summary: issue.fields.summary,
@@ -57,9 +62,9 @@ export async function fetchJiraTicket(
       status: issue.fields.status?.name,
       assignee: issue.fields.assignee?.displayName,
       comments: issue.fields.comment?.comments
-        ?.map((c: any) => c.body?.content?.[0]?.content?.[0]?.text || '')
+        ?.map((c: JiraComment) => c.body?.content?.[0]?.content?.[0]?.text || '')
         .join('\n'),
-      relatedTickets: issue.fields.issuelinks?.map((link: any) => link.outwardIssue?.key),
+      relatedTickets: issue.fields.issuelinks?.map((link: JiraIssueLink) => link.outwardIssue?.key),
     }
   } catch (error) {
     console.error('Error fetching Jira ticket:', error)
@@ -72,7 +77,8 @@ export async function parseJiraXml(xmlText: string): Promise<JiraDetails[]> {
     const parsed = await parseStringPromise(xmlText)
     const items = parsed.rss?.channel?.[0]?.item || []
 
-    return items.map((item: any) => ({
+    type JiraXmlItem = Record<string, string[]>
+    return items.map((item: JiraXmlItem) => ({
       id: item.key?.[0] || uuidv4(),
       summary: item.summary?.[0] || item.title?.[0] || '',
       description: item.description?.[0] || '',

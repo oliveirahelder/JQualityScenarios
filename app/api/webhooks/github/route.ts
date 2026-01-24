@@ -8,6 +8,30 @@ import {
 } from '@/lib/github-service'
 import { verifyGitHubSignature } from '@/lib/webhook-utils'
 
+type GitHubRepo = {
+  name: string
+  owner: { login: string }
+}
+
+type GitHubPullRequest = {
+  number: number
+  title: string
+  body: string
+  url: string
+}
+
+type GitHubPullRequestPayload = {
+  action?: string
+  pull_request?: GitHubPullRequest
+  repository?: GitHubRepo
+}
+
+type GitHubPushPayload = {
+  ref?: string
+  commits?: unknown[]
+  repository?: { name?: string }
+}
+
 /**
  * POST /api/webhooks/github
  * Handles GitHub webhook events: pull_request, push
@@ -27,14 +51,14 @@ export async function POST(request: NextRequest) {
     }
 
     const event = request.headers.get('x-github-event')
-    const payload = JSON.parse(body)
+    const payload = JSON.parse(body) as GitHubPullRequestPayload | GitHubPushPayload
 
     console.log(`[GitHub Webhook] Received ${event} event`)
 
     if (event === 'pull_request') {
-      await handlePullRequest(payload)
+      await handlePullRequest(payload as GitHubPullRequestPayload)
     } else if (event === 'push') {
-      await handlePush(payload)
+      await handlePush(payload as GitHubPushPayload)
     }
 
     return NextResponse.json({ ok: true })
@@ -50,7 +74,7 @@ export async function POST(request: NextRequest) {
 /**
  * Handle pull_request events (opened, synchronize, closed)
  */
-async function handlePullRequest(payload: any) {
+async function handlePullRequest(payload: GitHubPullRequestPayload) {
   try {
     const action = payload.action // 'opened', 'synchronize', 'closed', etc.
     const pr = payload.pull_request
@@ -156,9 +180,9 @@ async function handlePullRequest(payload: any) {
 /**
  * Handle push events (commits to main branches)
  */
-async function handlePush(payload: any) {
+async function handlePush(payload: GitHubPushPayload) {
   try {
-    const ref = payload.ref // 'refs/heads/main', etc.
+    const ref = payload.ref || '' // 'refs/heads/main', etc.
     const commits = payload.commits || []
     const repo = payload.repository
 

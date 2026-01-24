@@ -27,8 +27,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
+    const cutoffDate = new Date(Date.UTC(2025, 11, 1))
     const snapshots = await prisma.sprintSnapshot.findMany({
       orderBy: { endDate: 'desc' },
+      where: { endDate: { gte: cutoffDate } },
+      take: 10,
     })
 
     const result = snapshots.map((snapshot) => ({

@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
-import { syncAllSprints, syncActiveSprints, syncRecentClosedSprints } from '@/lib/sprint-sync'
+import {
+  syncAllSprints,
+  syncActiveSprints,
+  syncRecentClosedSprints,
+  syncAllClosedSprints,
+} from '@/lib/sprint-sync'
 import { prisma } from '@/lib/prisma'
 import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
 import type { JiraCredentials } from '@/lib/jira-config'
@@ -56,6 +61,9 @@ export async function POST(req: NextRequest) {
         break
       case 'closed':
         result = await syncRecentClosedSprints(credentials)
+        break
+      case 'closed_all':
+        result = await syncAllClosedSprints(credentials)
         break
       case 'all':
       default:

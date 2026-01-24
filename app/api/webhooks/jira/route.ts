@@ -4,21 +4,50 @@ import { normalizeSprint, normalizeIssue } from '@/lib/jira-sprints'
 import { ensureSprintSnapshot } from '@/lib/sprint-snapshot'
 import { verifyJiraSignature, parseWebhookPayload } from '@/lib/webhook-utils'
 
-function getSprintFieldValue(issue: any) {
-  const sprintFieldKey = process.env.JIRA_SPRINT_FIELD_ID || 'sprint'
-  return issue?.fields?.[sprintFieldKey] ?? issue?.fields?.sprint
+type JiraChangelogItem = {
+  field?: string | null
+  fieldtype?: string | null
+  toString?: string | null
+  to?: string | null
 }
 
-function getSprintIdFromField(sprintField: any): string | null {
+type JiraIssuePayload = {
+  key?: string
+  fields?: Record<string, unknown>
+}
+
+type JiraSprintPayload = {
+  id?: number | string
+  name?: string
+  startDate?: string | Date
+  endDate?: string | Date
+}
+
+type JiraWebhookBody = {
+  webhookEvent?: string
+  event_type?: string
+  issue?: JiraIssuePayload
+  sprint?: JiraSprintPayload
+  changelog?: { items?: JiraChangelogItem[] }
+}
+
+function getSprintFieldValue(issue: JiraIssuePayload | undefined) {
+  const sprintFieldKey = process.env.JIRA_SPRINT_FIELD_ID || 'sprint'
+  if (!issue?.fields) return undefined
+  return issue.fields[sprintFieldKey] ?? issue.fields.sprint
+}
+
+function getSprintIdFromField(sprintField: unknown): string | null {
   if (!sprintField) return null
 
   if (Array.isArray(sprintField)) {
-    const last = sprintField[sprintField.length - 1]
+    const last = sprintField[sprintField.length - 1] as { id?: number | string }
     return last?.id?.toString() || null
   }
 
   if (typeof sprintField === 'object') {
-    return sprintField.id?.toString() || null
+    const field = sprintField as { id?: number | string }
+    return field.id?.toString() || null
   }
 
   return null
@@ -41,7 +70,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const body = parseWebhookPayload(bodyText)
+    const body = parseWebhookPayload(bodyText) as JiraWebhookBody | null
     if (!body) {
       return NextResponse.json(
         { error: 'Invalid payload' },
@@ -84,9 +113,12 @@ export async function POST(req: NextRequest) {
 /**
  * Handle new issue creation
  */
-async function handleIssueCreated(body: any) {
+async function handleIssueCreated(body: JiraWebhookBody) {
   try {
     const issue = body.issue
+    if (!issue?.key) {
+      return NextResponse.json({ ok: true })
+    }
 
     // Find sprint from issue if available
     const sprintField = getSprintFieldValue(issue)
@@ -101,7 +133,7 @@ async function handleIssueCreated(body: any) {
     })
 
     if (!sprint) {
-      console.log(`[JIRA Webhook] Sprint not found: ${sprintField.id}`)
+      console.log(`[JIRA Webhook] Sprint not found: ${sprintId}`)
       return NextResponse.json({ ok: true })
     }
 
@@ -144,9 +176,12 @@ async function handleIssueCreated(body: any) {
 /**
  * Handle issue updates (status changes, assignment changes)
  */
-async function handleIssueUpdated(body: any) {
+async function handleIssueUpdated(body: JiraWebhookBody) {
   try {
     const issue = body.issue
+    if (!issue?.key) {
+      return NextResponse.json({ ok: true })
+    }
     const changelog = body.changelog?.items || []
 
     // Find ticket in database
@@ -161,20 +196,20 @@ async function handleIssueUpdated(body: any) {
 
     // Check for status changes
     const statusChange = changelog.find(
-      (item: any) => item.field === 'status' || item.fieldtype === 'status'
+      (item: JiraChangelogItem) => item.field === 'status' || item.fieldtype === 'status'
     )
 
     if (statusChange) {
       const newStatus = statusChange.toString || statusChange.to || 'IN_PROGRESS'
       await prisma.ticket.update({
         where: { id: ticket.id },
-        data: { status: newStatus as any },
+        data: { status: newStatus as string },
       })
     }
 
     // Check for assignee changes
     const assigneeChange = changelog.find(
-      (item: any) => item.field === 'assignee' || item.fieldtype === 'assignee'
+      (item: JiraChangelogItem) => item.field === 'assignee' || item.fieldtype === 'assignee'
     )
 
     if (assigneeChange) {
@@ -196,9 +231,12 @@ async function handleIssueUpdated(body: any) {
 /**
  * Handle sprint creation
  */
-async function handleSprintCreated(body: any) {
+async function handleSprintCreated(body: JiraWebhookBody) {
   try {
     const sprint = body.sprint
+    if (!sprint) {
+      return NextResponse.json({ ok: true })
+    }
     const normalized = normalizeSprint(sprint)
 
     // Check if sprint already exists
@@ -232,9 +270,12 @@ async function handleSprintCreated(body: any) {
 /**
  * Handle sprint start
  */
-async function handleSprintStarted(body: any) {
+async function handleSprintStarted(body: JiraWebhookBody) {
   try {
     const sprint = body.sprint
+    if (!sprint) {
+      return NextResponse.json({ ok: true })
+    }
     const normalized = normalizeSprint(sprint)
 
     await prisma.sprint.update({
@@ -253,9 +294,12 @@ async function handleSprintStarted(body: any) {
 /**
  * Handle sprint closure
  */
-async function handleSprintClosed(body: any) {
+async function handleSprintClosed(body: JiraWebhookBody) {
   try {
     const sprint = body.sprint
+    if (!sprint) {
+      return NextResponse.json({ ok: true })
+    }
     const normalized = normalizeSprint(sprint)
 
     const updatedSprint = await prisma.sprint.update({
