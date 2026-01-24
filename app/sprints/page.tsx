@@ -62,7 +62,7 @@ export default function SprintsPage() {
   const getSprintProgress = (tickets: SprintTicket[] | undefined) => {
     const total = tickets?.length || 0
     if (!total) return { closed: 0, total: 0 }
-    const closed = tickets.filter((ticket) => {
+    const closed = (tickets || []).filter((ticket) => {
       const status = (ticket?.status || '').toLowerCase()
       return status.includes('closed')
     }).length
@@ -595,7 +595,7 @@ export default function SprintsPage() {
                                             )}
                                           </td>
                                           <td className="py-2 pr-4 text-slate-100 max-w-[320px]">
-                                            <span className="block truncate" title={ticket.summary}>
+                                            <span className="block truncate" title={ticket.summary ?? ''}>
                                               {ticket.summary}
                                             </span>
                                           </td>
