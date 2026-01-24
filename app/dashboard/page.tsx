@@ -30,6 +30,10 @@ export default function Dashboard() {
       storyPointsCompleted: number
       totalTickets: number
       closedTickets: number
+      topClosed: { name: string; total: number; closed: number; remaining: number } | null
+      bottomClosed: { name: string; total: number; closed: number; remaining: number } | null
+      topRemaining: { name: string; total: number; closed: number; remaining: number } | null
+      bottomRemaining: { name: string; total: number; closed: number; remaining: number } | null
     }>,
     storyPoints: {
       currentTotal: null as number | null,
@@ -233,6 +237,37 @@ export default function Dashboard() {
       })),
     },
     {
+      title: 'Delivery Commitment',
+      value: metricValues.activeSprintCount ?? '--',
+      subtitle: 'Assignee SP delivery per sprint',
+      icon: Zap,
+      color: 'from-amber-600 to-amber-500',
+      trend: metricsLoading ? '...' : '',
+      rows: metricValues.activeSprints.map((sprint) => {
+        const topClosed = sprint.topClosed
+          ? `${sprint.topClosed.name} (${sprint.topClosed.total}/${sprint.topClosed.closed})`
+          : 'N/A'
+        const bottomClosed = sprint.bottomClosed
+          ? `${sprint.bottomClosed.name} (${sprint.bottomClosed.total}/${sprint.bottomClosed.closed})`
+          : 'N/A'
+        const topRemaining = sprint.topRemaining
+          ? `${sprint.topRemaining.name} (${sprint.topRemaining.total}/${sprint.topRemaining.remaining})`
+          : 'N/A'
+        const bottomRemaining = sprint.bottomRemaining
+          ? `${sprint.bottomRemaining.name} (${sprint.bottomRemaining.total}/${sprint.bottomRemaining.remaining})`
+          : 'N/A'
+        return {
+          label: sprint.name,
+          lines: [
+            `Most closed: ${topClosed}`,
+            `Least closed: ${bottomClosed}`,
+            `Most remaining: ${topRemaining}`,
+            `Least remaining: ${bottomRemaining}`,
+          ],
+        }
+      }),
+    },
+    {
       title: 'Assignees',
       value: metricsLoading ? '--' : metricValues.assignees.length,
       subtitle: '',
@@ -346,6 +381,25 @@ export default function Dashboard() {
                                 {value}
                               </span>
                             ))}
+                          </div>
+                        )
+                      }
+                      if (row.lines) {
+                        return (
+                          <div
+                            key={row.label}
+                            className="rounded-lg bg-slate-900/40 px-2.5 py-2"
+                          >
+                            <div className="text-[11px] uppercase text-slate-500 mb-1">
+                              {row.label}
+                            </div>
+                            <div className="space-y-1 text-xs text-slate-200">
+                              {row.lines.map((line, index) => (
+                                <div key={`${row.label}-line-${index}`} className="flex justify-between gap-2">
+                                  <span className="truncate">{line}</span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         )
                       }

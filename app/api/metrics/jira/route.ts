@@ -84,6 +84,43 @@ export async function GET(request: NextRequest) {
         Math.ceil((sprint.endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
       )
 
+      const assigneeTotals = new Map<string, { total: number; closed: number }>()
+      for (const ticket of sprint.tickets || []) {
+        const name = (ticket.assignee || '').trim()
+        if (!name) continue
+        const points = ticket.storyPoints || 0
+        const entry = assigneeTotals.get(name) || { total: 0, closed: 0 }
+        entry.total += points
+        const isClosed = CLOSED_STATUSES.some((status) =>
+          (ticket.status || '').toLowerCase().includes(status)
+        )
+        if (isClosed) {
+          entry.closed += points
+        }
+        assigneeTotals.set(name, entry)
+      }
+
+      const assigneeTotalsList = Array.from(assigneeTotals.entries()).map(
+        ([name, values]) => ({
+          name,
+          total: values.total,
+          closed: values.closed,
+          remaining: Math.max(0, values.total - values.closed),
+        })
+      )
+
+      const byClosed = [...assigneeTotalsList].sort(
+        (a, b) => b.closed - a.closed || a.name.localeCompare(b.name)
+      )
+      const byRemaining = [...assigneeTotalsList].sort(
+        (a, b) => b.remaining - a.remaining || a.name.localeCompare(b.name)
+      )
+      const topClosed = byClosed[0] || null
+      const bottomClosed = byClosed.length > 1 ? byClosed[byClosed.length - 1] : null
+      const topRemaining = byRemaining[0] || null
+      const bottomRemaining =
+        byRemaining.length > 1 ? byRemaining[byRemaining.length - 1] : null
+
       return {
         id: sprint.id,
         name: sprint.name,
@@ -97,6 +134,10 @@ export async function GET(request: NextRequest) {
         storyPointsCompleted,
         totalTickets,
         closedTickets,
+        topClosed,
+        bottomClosed,
+        topRemaining,
+        bottomRemaining,
       }
     })
 
