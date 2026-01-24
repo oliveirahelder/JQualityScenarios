@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
-import { Menu, X, LogOut, Settings } from 'lucide-react'
+import { Menu, X, LogOut, Settings, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export default function Navbar() {
@@ -12,6 +12,12 @@ export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
   const [role, setRole] = useState<string | null>(null)
   const [userName, setUserName] = useState<string | null>(null)
+  const [connectionStatus, setConnectionStatus] = useState({
+    jira: 'disconnected',
+    confluence: 'disconnected',
+    github: 'disconnected',
+    database: 'connected',
+  })
 
   const handleLogout = () => {
     localStorage.removeItem('token')
@@ -35,6 +41,45 @@ export default function Navbar() {
     }
   }, [])
 
+  useEffect(() => {
+    const loadConnections = async () => {
+      try {
+        const authToken = localStorage.getItem('token')
+        const [jiraResponse, confluenceResponse] = await Promise.all([
+          fetch('/api/integrations/jira', {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }),
+          fetch('/api/integrations/confluence', {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }),
+        ])
+
+        let jiraStatus = 'disconnected'
+        if (jiraResponse.ok) {
+          const jiraData = await jiraResponse.json()
+          jiraStatus = jiraData?.connectionStatus === 'connected' ? 'connected' : 'disconnected'
+        }
+
+        let confluenceStatus = 'disconnected'
+        if (confluenceResponse.ok) {
+          const confluenceData = await confluenceResponse.json()
+          confluenceStatus =
+            confluenceData?.connectionStatus === 'connected' ? 'connected' : 'disconnected'
+        }
+
+        setConnectionStatus((prev) => ({
+          ...prev,
+          jira: jiraStatus,
+          confluence: confluenceStatus,
+        }))
+      } catch {
+        // Keep defaults on error
+      }
+    }
+
+    loadConnections()
+  }, [])
+
   const navLinks = [
     { href: '/dashboard', label: 'Dashboard', icon: '📊' },
     { href: '/sprints', label: 'Sprints', icon: '🏃' },
@@ -45,6 +90,9 @@ export default function Navbar() {
 
   const isActive = (href: string) => pathname === href
   const roleLabel = getRoleLabel(role)
+  const hasConnectionError = Object.values(connectionStatus).some(
+    (status) => status !== 'connected'
+  )
 
   return (
     <>
@@ -83,6 +131,20 @@ export default function Navbar() {
 
             {/* User Actions */}
             <div className="flex items-center gap-2">
+              <Link
+                href="/settings"
+                className="hidden sm:flex items-center gap-2 px-2 py-1 rounded-md border border-slate-800 bg-slate-900/50 hover:bg-slate-800/60 transition-colors"
+                title="Connection status"
+              >
+                {hasConnectionError ? (
+                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-green-400" />
+                )}
+                <span className={`text-xs font-semibold ${hasConnectionError ? 'text-amber-300' : 'text-green-300'}`}>
+                  System Status
+                </span>
+              </Link>
               {roleLabel && (
                 <div className="hidden sm:flex flex-col items-end text-xs text-slate-300 mr-2">
                   <span className="font-semibold text-slate-200">
