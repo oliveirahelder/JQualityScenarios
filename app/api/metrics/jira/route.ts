@@ -2,30 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
-import { getActiveSprints } from '@/lib/jira-sprints'
 
-type TicketStatusBucket = 'todo' | 'in_progress' | 'done' | 'other'
-
-function bucketStatus(statusName: string | undefined): TicketStatusBucket {
-  const value = (statusName || '').toLowerCase().trim()
-  if (!value) return 'other'
-  if (value.includes('done') || value.includes('closed') || value.includes('resolved')) {
-    return 'done'
-  }
-  if (value.includes('in progress') || value.includes('progress') || value.includes('doing')) {
-    return 'in_progress'
-  }
-  if (
-    value.includes('to do') ||
-    value.includes('todo') ||
-    value.includes('backlog') ||
-    value.includes('new') ||
-    value.includes('open')
-  ) {
-    return 'todo'
-  }
-  return 'other'
-}
+const CLOSED_STATUSES = ['closed', 'done', 'resolved']
+const DEV_STATUSES = ['in progress', 'in development', 'in refinement']
 
 export async function GET(request: NextRequest) {
   try {
@@ -51,28 +30,100 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Jira integration not configured' }, { status: 400 })
     }
 
-    const activeSprints = await getActiveSprints(jiraCredentials)
-    const ticketStatusCounts = {
-      todo: 0,
-      in_progress: 0,
-      done: 0,
-      other: 0,
-    }
+    const activeSprints = await prisma.sprint.findMany({
+      where: { status: 'ACTIVE' },
+      include: { tickets: true },
+      orderBy: { endDate: 'asc' },
+    })
 
-    const seenKeys = new Set<string>()
-    for (const sprint of activeSprints) {
-      for (const issue of sprint.issues || []) {
-        if (!issue.key || seenKeys.has(issue.key)) continue
-        seenKeys.add(issue.key)
-        const bucket = bucketStatus(issue.fields?.status?.name)
-        ticketStatusCounts[bucket] += 1
+    const now = new Date()
+    const activeSprintMetrics = activeSprints.map((sprint) => {
+      const totalTickets =
+        typeof sprint.totalTickets === 'number' && sprint.totalTickets > 0
+          ? sprint.totalTickets
+          : sprint.tickets.length
+      const closedTickets =
+        typeof sprint.closedTickets === 'number' && sprint.closedTickets >= 0
+          ? sprint.closedTickets
+          : sprint.tickets.filter((ticket) =>
+              CLOSED_STATUSES.some((status) =>
+                (ticket.status || '').toLowerCase().includes(status)
+              )
+            ).length
+      const successPercent = totalTickets
+        ? Math.round((closedTickets / totalTickets) * 1000) / 10
+        : 0
+      const devTickets = sprint.tickets.filter((ticket) =>
+        DEV_STATUSES.some((status) =>
+          (ticket.status || '').toLowerCase().includes(status)
+        )
+      ).length
+      const doneTickets = sprint.tickets.filter((ticket) =>
+        CLOSED_STATUSES.some((status) =>
+          (ticket.status || '').toLowerCase().includes(status)
+        )
+      ).length
+      const bounceBackTickets = sprint.tickets.filter(
+        (ticket) => (ticket.qaBounceBackCount || 0) > 0
+      ).length
+      const bounceBackPercent = totalTickets
+        ? Math.round((bounceBackTickets / totalTickets) * 1000) / 10
+        : 0
+      const storyPointsTotal =
+        sprint.storyPointsTotal > 0
+          ? sprint.storyPointsTotal
+          : sprint.tickets.reduce((sum, ticket) => sum + (ticket.storyPoints || 0), 0)
+      const storyPointsCompleted = sprint.tickets.reduce((sum, ticket) => {
+        const isClosed = CLOSED_STATUSES.some((status) =>
+          (ticket.status || '').toLowerCase().includes(status)
+        )
+        return sum + (isClosed ? ticket.storyPoints || 0 : 0)
+      }, 0)
+      const daysLeft = Math.max(
+        0,
+        Math.ceil((sprint.endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+      )
+
+      return {
+        id: sprint.id,
+        name: sprint.name,
+        successPercent,
+        daysLeft,
+        devTickets,
+        doneTickets,
+        bounceBackPercent,
+        bounceBackTickets,
+        storyPointsTotal,
+        storyPointsCompleted,
+        totalTickets,
+        closedTickets,
       }
-    }
+    })
+
+    const currentStoryPoints = activeSprintMetrics.reduce(
+      (sum, sprint) => sum + sprint.storyPointsTotal,
+      0
+    )
+    const previousSprint = await prisma.sprint.findFirst({
+      where: { status: { in: ['CLOSED', 'COMPLETED'] } },
+      include: { tickets: true },
+      orderBy: { endDate: 'desc' },
+    })
+    const previousStoryPoints = previousSprint
+      ? previousSprint.storyPointsTotal > 0
+        ? previousSprint.storyPointsTotal
+        : previousSprint.tickets.reduce((sum, ticket) => sum + (ticket.storyPoints || 0), 0)
+      : 0
+    const storyPointsDelta = currentStoryPoints - previousStoryPoints
 
     return NextResponse.json({
-      activeSprintCount: activeSprints.length,
-      totalTickets: seenKeys.size,
-      ticketStatusCounts,
+      activeSprintCount: activeSprintMetrics.length,
+      activeSprints: activeSprintMetrics,
+      storyPoints: {
+        currentTotal: currentStoryPoints,
+        previousTotal: previousStoryPoints,
+        delta: storyPointsDelta,
+      },
     })
   } catch (error) {
     console.error('[Metrics] Jira metrics error:', error)
