@@ -11,6 +11,17 @@ export interface SearchResult {
   summary: string
 }
 
+type ConfluenceSearchResponse = {
+  data: {
+    results?: Array<{
+      id: string
+      title: string
+      body?: { view?: { value?: string } }
+      _links?: { webui?: string; tinyui?: string; self?: string }
+    }>
+  }
+}
+
 /**
  * Generate search terms from query using simple keyword extraction
  */
@@ -138,7 +149,7 @@ export async function searchConfluencePages(
 
     for (const keyword of searchTerms) {
       try {
-        let confluenceResponse = null as null | { data: any }
+        let confluenceResponse: ConfluenceSearchResponse | null = null
 
         for (const baseUrl of baseCandidates) {
           try {
@@ -168,7 +179,7 @@ export async function searchConfluencePages(
             if ((confluenceResponse?.data?.results || []).length > 0) {
               break
             }
-          } catch (error) {
+          } catch {
             confluenceResponse = null
             continue
           }

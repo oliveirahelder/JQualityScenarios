@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
 
-export function withAuth(handler: (req: NextRequest, context: any) => Promise<NextResponse>) {
-  return async (req: NextRequest, context: any) => {
+type RouteContext = { params?: Record<string, string> }
+type AuthedRequest = NextRequest & { user?: ReturnType<typeof verifyToken> }
+
+export function withAuth(
+  handler: (req: AuthedRequest, context: RouteContext) => Promise<NextResponse>
+) {
+  return async (req: AuthedRequest, context: RouteContext) => {
     try {
       const token = extractTokenFromHeader(req.headers.get('authorization'))
 
@@ -23,10 +28,10 @@ export function withAuth(handler: (req: NextRequest, context: any) => Promise<Ne
       }
 
       // Attach user info to request for use in handler
-      ;(req as any).user = payload
+      req.user = payload
 
       return handler(req, context)
-    } catch (error) {
+    } catch {
       return NextResponse.json(
         { error: 'Authentication failed' },
         { status: 401 }
@@ -36,9 +41,9 @@ export function withAuth(handler: (req: NextRequest, context: any) => Promise<Ne
 }
 
 export function withRole(...roles: string[]) {
-  return (handler: (req: NextRequest, context: any) => Promise<NextResponse>) => {
-    return async (req: NextRequest, context: any) => {
-      const user = (req as any).user
+  return (handler: (req: AuthedRequest, context: RouteContext) => Promise<NextResponse>) => {
+    return async (req: AuthedRequest, context: RouteContext) => {
+      const user = req.user
 
       if (!user || !roles.includes(user.role)) {
         return NextResponse.json(

@@ -17,18 +17,70 @@ export async function GET(req: NextRequest) {
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { jiraBaseUrl: true },
+      select: { jiraBaseUrl: true, jiraBoardIds: true },
     })
 
+    const jiraBoardId = user?.jiraBoardIds
+      ? user.jiraBoardIds
+          .split(',')
+          .map((value) => parseInt(value.trim(), 10))
+          .find((value) => !Number.isNaN(value))
+      : null
+
+    const cutoffDate = new Date(Date.UTC(2025, 11, 1))
     const sprints = await prisma.sprint.findMany({
       include: {
-        tickets: true,
+        tickets: {
+          include: {
+            devInsights: true,
+            testScenarios: true,
+          },
+        },
         documentationDrafts: true,
+        snapshot: true,
+      },
+      where: {
+        OR: [
+          { status: { notIn: ['COMPLETED', 'CLOSED'] } },
+          { endDate: { gte: cutoffDate } },
+        ],
       },
       orderBy: { startDate: 'desc' },
     })
 
-    return NextResponse.json({ sprints, jiraBaseUrl: user?.jiraBaseUrl || '' })
+    const normalizedSprints = sprints.map((sprint) => {
+      let snapshotTotals = null
+      if (sprint.snapshot?.totals) {
+        try {
+          snapshotTotals = JSON.parse(sprint.snapshot.totals)
+        } catch {
+          snapshotTotals = null
+        }
+      }
+
+      // Calculate documentation pipeline status
+      const docDrafts = sprint.documentationDrafts || []
+      const docStats = {
+        total: docDrafts.length,
+        draft: docDrafts.filter((d) => d.status === 'draft').length,
+        underReview: docDrafts.filter((d) => d.status === 'under_review').length,
+        approved: docDrafts.filter((d) => d.status === 'approved').length,
+        published: docDrafts.filter((d) => d.status === 'published').length,
+      }
+
+      return {
+        ...sprint,
+        snapshotTotals,
+        documentationStats: docStats,
+        lastSyncedAt: sprint.updatedAt,
+      }
+    })
+
+    return NextResponse.json({
+      sprints: normalizedSprints,
+      jiraBaseUrl: user?.jiraBaseUrl || '',
+      jiraBoardId: jiraBoardId ?? null,
+    })
   } catch (error) {
     console.error('Error fetching sprints:', error)
     return NextResponse.json(

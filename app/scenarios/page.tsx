@@ -7,11 +7,21 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Zap, Copy, Check, AlertCircle, Sparkles, Code2 } from 'lucide-react'
 
+type ScenarioResult = {
+  jiraDetails: {
+    id: string
+    status?: string | null
+    summary: string
+    description?: string | null
+  }
+  scenarios?: string[]
+}
+
 export default function GenerateScenariosPage() {
   const [ticketId, setTicketId] = useState('')
   const [confluence, setConfluence] = useState('')
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<any>(null)
+  const [result, setResult] = useState<ScenarioResult | null>(null)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState<number | null>(null)
 
@@ -88,7 +98,7 @@ export default function GenerateScenariosPage() {
                       className="bg-slate-800/50 border-slate-700"
                     />
                     <p className="text-xs text-slate-500">
-                      ℹ️ The system will fetch details from Jira API
+                      Info: The system will fetch details from Jira API
                     </p>
                   </div>
 
@@ -221,7 +231,7 @@ export default function GenerateScenariosPage() {
                 <CardContent className="py-16 text-center">
                   <Sparkles className="w-12 h-12 text-slate-600 mx-auto mb-4 opacity-50" />
                   <p className="text-slate-400 max-w-md mx-auto">
-                    Enter a Jira ticket ID and click "Generate Scenarios" to see AI-generated test scenarios here.
+                    Enter a Jira ticket ID and click &quot;Generate Scenarios&quot; to see AI-generated test scenarios here.
                   </p>
                 </CardContent>
               </Card>

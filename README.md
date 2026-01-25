@@ -1,10 +1,10 @@
-# QABOT - Centralized Intelligence Platform
+# JQuality - Centralized Intelligence Platform
 
 A sophisticated platform that connects Jira, GitHub, and Confluence to automate test scenario generation, audit technical impacts in real-time, and publish validated "As-Built" documentation with full traceability.
 
 ## 🎯 Project Vision
 
-QABOT anticipates test scenarios from Sprint creation, analyzes developer code changes, executes functional tests only after Staging deployment, and maintains human-reviewed documentation—ensuring 100% traceability from Sprint creation to final publication.
+JQuality anticipates test scenarios from Sprint creation, analyzes developer code changes, executes functional tests only after Staging deployment, and maintains human-reviewed documentation—ensuring 100% traceability from Sprint creation to final publication.
 
 ## 🏗️ Architecture
 
@@ -109,3 +109,4 @@ This is a focused, enterprise project. For significant changes, please discuss w
 ## 📝 License
 
 Internal use only.
+

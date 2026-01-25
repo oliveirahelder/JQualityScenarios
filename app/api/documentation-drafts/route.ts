@@ -19,7 +19,9 @@ export async function GET(req: NextRequest) {
     const sprintId = searchParams.get('sprintId')
     const status = searchParams.get('status')
 
-    const where: any = { userId: payload.userId }
+    const where: { userId: string; sprintId?: string; status?: string } = {
+      userId: payload.userId,
+    }
     if (sprintId) where.sprintId = sprintId
     if (status) where.status = status
 

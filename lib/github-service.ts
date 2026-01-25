@@ -174,7 +174,8 @@ export async function getPRCommitMessages(
       }
     )
 
-    return response.data.map((commit: any) => commit.commit.message)
+    type GitHubCommit = { commit?: { message?: string } }
+    return response.data.map((commit: GitHubCommit) => commit.commit?.message || '')
   } catch (error) {
     console.error('[GitHub] Error fetching commits:', error)
     return []
