@@ -11,6 +11,7 @@ const QA_READY_STATUSES = [
   'awaiting approval',
   'in release',
 ]
+const QA_ACTIVE_STATUSES = ['in qa']
 const DEV_STATUSES = ['in progress', 'in development', 'in refinement']
 const END_STATUSES = [...QA_READY_STATUSES, ...CLOSED_STATUSES]
 
@@ -38,11 +39,19 @@ type SprintWithTickets = {
   id: string
   name: string
   endDate: Date
+  startDate: Date
   status: string
   totalTickets: number
   closedTickets: number
   storyPointsTotal: number
   tickets: JiraTicketLite[]
+}
+
+function getTeamKey(name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return 'Team'
+  const match = trimmed.match(/^[A-Za-z0-9]+/)
+  return match ? match[0].toUpperCase() : trimmed.toUpperCase()
 }
 
 function isStrictClosed(status?: string | null) {
@@ -198,6 +207,11 @@ export async function GET(request: NextRequest) {
           (ticket.status || '').toLowerCase().includes(status)
         )
       ).length
+      const qaTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
+        QA_ACTIVE_STATUSES.some((status) =>
+          (ticket.status || '').toLowerCase().includes(status)
+        )
+      ).length
       const doneTickets = closedTickets
       const qaReadyTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
         QA_READY_STATUSES.some((status) =>
@@ -250,9 +264,11 @@ export async function GET(request: NextRequest) {
       return {
         id: sprint.id,
         name: sprint.name,
+        teamKey: getTeamKey(sprint.name),
         successPercent,
         daysLeft,
         devTickets,
+        qaTickets,
         doneTickets,
         qaReadyTickets,
         bounceBackPercent,
@@ -459,11 +475,38 @@ export async function GET(request: NextRequest) {
         storyPointSprintCount: storyPointAveragesMap.get(entry.name)?.sprintCount ?? 0,
       })),
     }))
-    const previousSprint = (await prisma.sprint.findFirst({
+    const previousSprints = (await prisma.sprint.findMany({
       where: { status: { in: ['CLOSED', 'COMPLETED'] } },
       include: { tickets: true },
       orderBy: { endDate: 'desc' },
-    })) as SprintWithTickets | null
+      take: 50,
+    })) as SprintWithTickets[]
+    const previousSprint = previousSprints[0] || null
+    const primaryActiveSprint = activeSprints[0] || null
+    const elapsedDays =
+      primaryActiveSprint && primaryActiveSprint.startDate
+        ? Math.max(
+            0,
+            Math.ceil(
+              (now.getTime() - primaryActiveSprint.startDate.getTime()) / (1000 * 60 * 60 * 24)
+            )
+          )
+        : 0
+    const previousPeriodEnd =
+      previousSprint && elapsedDays > 0
+        ? new Date(previousSprint.startDate.getTime() + elapsedDays * 24 * 60 * 60 * 1000)
+        : null
+    const previousClosedInPeriod = previousSprint
+      ? previousSprint.tickets.filter((ticket) => {
+          if (!isStrictClosed(ticket.status)) return false
+          if (!previousPeriodEnd) return true
+          return ticket.updatedAt >= previousSprint.startDate && ticket.updatedAt <= previousPeriodEnd
+        })
+      : []
+    const previousStoryPointsInPeriod = previousClosedInPeriod.reduce(
+      (sum: number, ticket: JiraTicketLite) => sum + (ticket.storyPoints || 0),
+      0
+    )
     const previousStoryPoints = previousSprint
       ? previousSprint.storyPointsTotal > 0
         ? previousSprint.storyPointsTotal
@@ -473,6 +516,53 @@ export async function GET(request: NextRequest) {
           )
       : 0
     const storyPointsDelta = currentStoryPoints - previousStoryPoints
+    const previousSprintsByTeam = new Map<string, SprintWithTickets[]>()
+    for (const sprint of previousSprints) {
+      const key = getTeamKey(sprint.name)
+      const entries = previousSprintsByTeam.get(key) || []
+      entries.push(sprint)
+      previousSprintsByTeam.set(key, entries)
+    }
+
+    const finishedComparisonByTeam = activeSprints.map((sprint) => {
+      const teamKey = getTeamKey(sprint.name)
+      const elapsedDays = Math.max(
+        0,
+        Math.ceil((now.getTime() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24))
+      )
+      const previousForTeam = previousSprintsByTeam.get(teamKey)?.[0] || null
+      const previousPeriodEnd =
+        previousForTeam && elapsedDays > 0
+          ? new Date(previousForTeam.startDate.getTime() + elapsedDays * 24 * 60 * 60 * 1000)
+          : null
+      const previousClosedInPeriod = previousForTeam
+        ? previousForTeam.tickets.filter((ticket) => {
+            if (!isStrictClosed(ticket.status)) return false
+            if (!previousPeriodEnd) return true
+            return (
+              ticket.updatedAt >= previousForTeam.startDate &&
+              ticket.updatedAt <= previousPeriodEnd
+            )
+          })
+        : []
+      const previousStoryPointsInPeriod = previousClosedInPeriod.reduce(
+        (sum: number, ticket: JiraTicketLite) => sum + (ticket.storyPoints || 0),
+        0
+      )
+      const activeMetrics = activeSprintMetrics.find((entry) => entry.id === sprint.id)
+      return {
+        teamKey,
+        activeSprintId: sprint.id,
+        activeSprintName: sprint.name,
+        activeClosedTickets: activeMetrics?.doneTickets ?? 0,
+        activeStoryPointsClosed: activeMetrics?.storyPointsCompleted ?? 0,
+        previousSprintId: previousForTeam?.id ?? null,
+        previousSprintName: previousForTeam?.name ?? null,
+        previousClosedTickets: previousClosedInPeriod.length,
+        previousStoryPointsClosed: previousStoryPointsInPeriod,
+        periodDays: elapsedDays,
+      }
+    })
 
     const responsePayload = {
       activeSprintCount: activeSprintMetrics.length,
@@ -482,6 +572,20 @@ export async function GET(request: NextRequest) {
         previousTotal: previousStoryPoints,
         delta: storyPointsDelta,
       },
+      finishedComparison: primaryActiveSprint
+        ? {
+            activeSprintId: primaryActiveSprint.id,
+            activeSprintName: primaryActiveSprint.name,
+            activeClosedTickets: activeSprintMetrics[0]?.doneTickets ?? 0,
+            activeStoryPointsClosed: activeSprintMetrics[0]?.storyPointsCompleted ?? 0,
+            previousSprintId: previousSprint?.id ?? null,
+            previousSprintName: previousSprint?.name ?? null,
+            previousClosedTickets: previousClosedInPeriod.length,
+            previousStoryPointsClosed: previousStoryPointsInPeriod,
+            periodDays: elapsedDays,
+          }
+        : null,
+      finishedComparisonByTeam,
       assignees,
       deliveryTimes: includeDeliveryTimes ? deliveryTimesWithPoints : [],
       deliveryTimesBySprint: includeDeliveryTimes ? deliveryTimesBySprintWithPoints : [],

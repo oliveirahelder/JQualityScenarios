@@ -30,7 +30,12 @@ export async function GET(req: NextRequest) {
     const cutoffDate = new Date(Date.UTC(2025, 11, 1))
     const sprints = await prisma.sprint.findMany({
       include: {
-        tickets: true,
+        tickets: {
+          include: {
+            devInsights: true,
+            testScenarios: true,
+          },
+        },
         documentationDrafts: true,
         snapshot: true,
       },
@@ -52,9 +57,22 @@ export async function GET(req: NextRequest) {
           snapshotTotals = null
         }
       }
+
+      // Calculate documentation pipeline status
+      const docDrafts = sprint.documentationDrafts || []
+      const docStats = {
+        total: docDrafts.length,
+        draft: docDrafts.filter((d) => d.status === 'draft').length,
+        underReview: docDrafts.filter((d) => d.status === 'under_review').length,
+        approved: docDrafts.filter((d) => d.status === 'approved').length,
+        published: docDrafts.filter((d) => d.status === 'published').length,
+      }
+
       return {
         ...sprint,
         snapshotTotals,
+        documentationStats: docStats,
+        lastSyncedAt: sprint.updatedAt,
       }
     })
 

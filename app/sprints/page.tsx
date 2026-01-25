@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Calendar, AlertCircle, ChevronRight, Zap } from 'lucide-react'
+import { Calendar, AlertCircle, ChevronRight, Zap, RefreshCw, Code2, CheckSquare, FileText } from 'lucide-react'
 
 export default function SprintsPage() {
   type SprintTicket = {
@@ -17,6 +17,16 @@ export default function SprintsPage() {
     storyPoints?: number | null
     qaBounceBackCount?: number | null
     prCount?: number | null
+    devInsights?: Array<{
+      id: string
+      prUrl?: string | null
+      aiAnalysis?: string | null
+      detectedImpactAreas?: string | null
+    }>
+    testScenarios?: Array<{
+      id: string
+      status: string
+    }>
   }
 
   type SprintSnapshotTotals = {
@@ -41,6 +51,14 @@ export default function SprintsPage() {
     storyPointsCompleted?: number | null
     snapshotTotals?: SprintSnapshotTotals | null
     tickets?: SprintTicket[]
+    documentationStats?: {
+      total: number
+      draft: number
+      underReview: number
+      approved: number
+      published: number
+    }
+    lastSyncedAt?: Date | string
   }
 
   const [sprints, setSprints] = useState<SprintItem[]>([])
@@ -57,6 +75,8 @@ export default function SprintsPage() {
   >({})
   const [assigneeFilterBySprint, setAssigneeFilterBySprint] = useState<Record<string, string>>({})
   const [expandedSprints, setExpandedSprints] = useState<Record<string, boolean>>({})
+  const [userRole, setUserRole] = useState<string>('')
+  const [syncingSprintId, setSyncingSprintId] = useState<string | null>(null)
   const searchParams = useSearchParams()
 
   const getSprintProgress = (tickets: SprintTicket[] | undefined) => {
@@ -105,6 +125,66 @@ export default function SprintsPage() {
     const diffMs = end.getTime() - now.getTime()
     const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
     return diffDays < 0 ? '0' : diffDays.toString()
+  }
+
+  const getLastSyncTime = (lastSyncedAt: Date | string | undefined) => {
+    if (!lastSyncedAt) return '--'
+    const syncDate = new Date(lastSyncedAt)
+    const now = new Date()
+    const diffMs = now.getTime() - syncDate.getTime()
+    const diffMins = Math.floor(diffMs / (1000 * 60))
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    const diffHours = Math.floor(diffMins / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+    const diffDays = Math.floor(diffHours / 24)
+    return `${diffDays}d ago`
+  }
+
+  const syncSprintFromJira = async (sprintId: string) => {
+    try {
+      setSyncingSprintId(sprintId)
+      const token = localStorage.getItem('token')
+      const response = await fetch('/api/admin/sprints/sync?type=active', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (response.ok) {
+        // Refresh sprints data
+        await fetchSprints()
+      }
+    } catch (error) {
+      console.error('Error syncing sprint:', error)
+    } finally {
+      setSyncingSprintId(null)
+    }
+  }
+
+  const getImpactAreas = (ticket: SprintTicket) => {
+    const devInsight = ticket.devInsights?.[0]
+    if (!devInsight?.detectedImpactAreas) return []
+    try {
+      const areas = JSON.parse(devInsight.detectedImpactAreas)
+      return Array.isArray(areas) ? areas : []
+    } catch {
+      return []
+    }
+  }
+
+  const getScenariosCount = (ticket: SprintTicket) => {
+    return ticket.testScenarios?.length || 0
+  }
+
+  const getImpactColor = (area: string) => {
+    const highRisk = ['DB Schema', 'Auth', 'API']
+    const mediumRisk = ['Error Handling', 'Performance', 'Config']
+    if (highRisk.some((r) => area.includes(r))) return 'bg-red-500/20 text-red-300'
+    if (mediumRisk.some((r) => area.includes(r))) return 'bg-yellow-500/20 text-yellow-300'
+    return 'bg-blue-500/20 text-blue-300'
   }
 
   const isDevStatus = (status: string | undefined) => {
@@ -183,6 +263,19 @@ export default function SprintsPage() {
         setSprints(data.sprints || [])
         setJiraBaseUrl(data.jiraBaseUrl || '')
         setJiraBoardId(typeof data.jiraBoardId === 'number' ? data.jiraBoardId : null)
+
+        // Decode token to get role
+        if (token) {
+          const parts = token.split('.')
+          if (parts.length === 3) {
+            try {
+              const payload = JSON.parse(atob(parts[1]))
+              setUserRole(payload.role || '')
+            } catch {
+              // Ignore decode errors
+            }
+          }
+        }
       }
     } catch (error) {
       console.error('Error fetching sprints:', error)
@@ -368,6 +461,55 @@ export default function SprintsPage() {
                           {isExpanded ? 'Collapse' : 'Expand'}
                         </Button>
                       </div>
+
+                      {/* Sync Status & Last Sync Time */}
+                      <div className="flex items-center gap-4 mb-3 text-xs">
+                        <div className="flex items-center gap-2 text-slate-400">
+                          <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                          <span>Last synced: {getLastSyncTime(sprint.lastSyncedAt)}</span>
+                        </div>
+                        {userRole && ['DEVOPS', 'ADMIN'].includes(userRole) && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => syncSprintFromJira(sprint.id)}
+                            disabled={syncingSprintId === sprint.id}
+                            className="text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 p-1 h-auto disabled:opacity-50"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${syncingSprintId === sprint.id ? 'animate-spin' : ''}`} />
+                          </Button>
+                        )}
+                      </div>
+
+                      {/* Documentation Pipeline Status */}
+                      {sprint.documentationStats && sprint.documentationStats.total > 0 && (
+                        <div className="flex items-center gap-2 mb-3 text-xs flex-wrap">
+                          <FileText className="w-3 h-3 text-slate-400" />
+                          <div className="flex gap-2">
+                            {sprint.documentationStats.draft > 0 && (
+                              <span className="px-2 py-1 rounded bg-slate-700/50 text-slate-300">
+                                📝 {sprint.documentationStats.draft}
+                              </span>
+                            )}
+                            {sprint.documentationStats.underReview > 0 && (
+                              <span className="px-2 py-1 rounded bg-yellow-700/50 text-yellow-300">
+                                🔍 {sprint.documentationStats.underReview}
+                              </span>
+                            )}
+                            {sprint.documentationStats.approved > 0 && (
+                              <span className="px-2 py-1 rounded bg-blue-700/50 text-blue-300">
+                                ✅ {sprint.documentationStats.approved}
+                              </span>
+                            )}
+                            {sprint.documentationStats.published > 0 && (
+                              <span className="px-2 py-1 rounded bg-green-700/50 text-green-300">
+                                📄 {sprint.documentationStats.published}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       <div className="flex flex-wrap gap-6 text-sm">
                         <div className="flex items-center gap-2 text-slate-400">
@@ -573,13 +715,14 @@ export default function SprintsPage() {
                                         <th className="py-2 pr-4">Summary</th>
                                         <th className="py-2 pr-4">Status</th>
                                         <th className="py-2 pr-4">SP</th>
-                                        <th className="py-2 pr-4">PRs</th>
-                                        <th className="py-2">Bounce</th>
+                                        <th className="py-2 pr-4">Impact</th>
+                                        <th className="py-2 pr-4">Scenarios</th>
+                                        <th className="py-2 pr-4">Bounce</th>
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/60 text-slate-200">
                                       {sorted.map((ticket: SprintTicket) => (
-                                        <tr key={ticket.id} className="align-top">
+                                        <tr key={ticket.id} className="align-top hover:bg-slate-800/20 transition-colors">
                                           <td className="py-2 pr-4 font-mono text-slate-300">
                                             {jiraBaseUrl ? (
                                               <a
@@ -605,8 +748,42 @@ export default function SprintsPage() {
                                           <td className="py-2 pr-4 text-slate-300">
                                             {ticket.storyPoints ?? 0}
                                           </td>
-                                          <td className="py-2 pr-4 text-slate-300">
-                                            {ticket.prCount ?? 0}
+                                          <td className="py-2 pr-4">
+                                            {(() => {
+                                              const areas = getImpactAreas(ticket)
+                                              if (areas.length === 0) {
+                                                return <span className="text-slate-500 text-xs">--</span>
+                                              }
+                                              return (
+                                                <div className="flex flex-wrap gap-1">
+                                                  {areas.slice(0, 2).map((area, idx) => (
+                                                    <span
+                                                      key={idx}
+                                                      className={`text-xs px-2 py-0.5 rounded ${getImpactColor(area)}`}
+                                                      title={area}
+                                                    >
+                                                      {area.length > 10 ? area.substring(0, 10) + '...' : area}
+                                                    </span>
+                                                  ))}
+                                                  {areas.length > 2 && (
+                                                    <span className="text-xs px-2 py-0.5 rounded bg-slate-700/50 text-slate-300">
+                                                      +{areas.length - 2}
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              )
+                                            })()}
+                                          </td>
+                                          <td className="py-2 pr-4">
+                                            {(() => {
+                                              const count = getScenariosCount(ticket)
+                                              return (
+                                                <div className="flex items-center gap-1">
+                                                  <CheckSquare className="w-3 h-3 text-blue-400" />
+                                                  <span className="text-sm font-semibold text-slate-300">{count}</span>
+                                                </div>
+                                              )
+                                            })()}
                                           </td>
                                           <td className="py-2 text-slate-300">
                                             {ticket.qaBounceBackCount ?? 0}

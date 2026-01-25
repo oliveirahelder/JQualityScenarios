@@ -54,14 +54,18 @@ type MetricCard = {
 export default function Dashboard() {
   const [metricsLoading, setMetricsLoading] = useState(true)
   const [deliveryLoading, setDeliveryLoading] = useState(false)
+  const [selectedSprintId, setSelectedSprintId] = useState<string | null>(null)
+  const [selectedActiveSprintId, setSelectedActiveSprintId] = useState<string | null>(null)
   const [metricValues, setMetricValues] = useState({
     activeSprintCount: null as number | null,
     activeSprints: [] as Array<{
       id: string
       name: string
+      teamKey: string
       successPercent: number
       daysLeft: number
       devTickets: number
+      qaTickets: number
       doneTickets: number
       bounceBackPercent: number
       bounceBackTickets: number
@@ -76,6 +80,29 @@ export default function Dashboard() {
       previousTotal: null as number | null,
       delta: null as number | null,
     },
+    finishedComparison: null as null | {
+      activeSprintId: string
+      activeSprintName: string
+      activeClosedTickets: number
+      activeStoryPointsClosed: number
+      previousSprintId: string | null
+      previousSprintName: string | null
+      previousClosedTickets: number
+      previousStoryPointsClosed: number
+      periodDays: number
+    },
+    finishedComparisonByTeam: [] as Array<{
+      teamKey: string
+      activeSprintId: string
+      activeSprintName: string
+      activeClosedTickets: number
+      activeStoryPointsClosed: number
+      previousSprintId: string | null
+      previousSprintName: string | null
+      previousClosedTickets: number
+      previousStoryPointsClosed: number
+      periodDays: number
+    }>,
     assignees: [] as Array<{
       name: string
       total: number
@@ -128,6 +155,8 @@ export default function Dashboard() {
             previousTotal: data.storyPoints?.previousTotal ?? null,
             delta: data.storyPoints?.delta ?? null,
           },
+          finishedComparison: data.finishedComparison ?? null,
+          finishedComparisonByTeam: data.finishedComparisonByTeam || [],
           assignees: data.assignees || [],
           deliveryTimes: data.deliveryTimes || [],
           deliveryTimesBySprint: data.deliveryTimesBySprint || [],
@@ -165,12 +194,30 @@ export default function Dashboard() {
     loadMetrics().then(loadDeliveryTimes)
   }, [])
 
+  useEffect(() => {
+    if (metricValues.activeSprints.length === 0) return
+    if (selectedSprintId) return
+    const sorted = [...metricValues.activeSprints].sort(
+      (a, b) => b.doneTickets - a.doneTickets || a.name.localeCompare(b.name)
+    )
+    setSelectedSprintId(sorted[0]?.id || null)
+  }, [metricValues.activeSprints, selectedSprintId])
+
+  useEffect(() => {
+    if (metricValues.activeSprints.length === 0) return
+    if (selectedActiveSprintId) return
+    const sorted = [...metricValues.activeSprints].sort(
+      (a, b) => a.daysLeft - b.daysLeft || a.name.localeCompare(b.name)
+    )
+    setSelectedActiveSprintId(sorted[0]?.id || null)
+  }, [metricValues.activeSprints, selectedActiveSprintId])
+
   const totalDevTickets = metricValues.activeSprints.reduce(
     (sum, sprint) => sum + sprint.devTickets,
     0
   )
-  const totalClosedTickets = metricValues.activeSprints.reduce(
-    (sum, sprint) => sum + sprint.doneTickets,
+  const totalQaTickets = metricValues.activeSprints.reduce(
+    (sum, sprint) => sum + sprint.qaTickets,
     0
   )
   const totalTickets = metricValues.activeSprints.reduce(
@@ -192,32 +239,170 @@ export default function Dashboard() {
   const totalBounceBackPercent = totalTickets
     ? Math.round((totalBounceBackTickets / totalTickets) * 1000) / 10
     : 0
+  const activeSprintByEnd = [...metricValues.activeSprints].sort(
+    (a, b) => a.daysLeft - b.daysLeft || a.name.localeCompare(b.name)
+  )
+  const currentActiveSprint =
+    metricValues.activeSprints.find((sprint) => sprint.id === selectedActiveSprintId) ||
+    activeSprintByEnd[0]
+  const currentSprintSuccessCount = currentActiveSprint
+    ? currentActiveSprint.qaReadyTickets + currentActiveSprint.doneTickets
+    : 0
+  const currentSprintSuccessPercent = currentActiveSprint?.totalTickets
+    ? Math.round((currentSprintSuccessCount / currentActiveSprint.totalTickets) * 1000) / 10
+    : 0
+
+  const selectedSprint = metricValues.activeSprints.find(
+    (sprint) => sprint.id === selectedSprintId
+  )
+  const selectedComparison = selectedSprint
+    ? metricValues.finishedComparisonByTeam.find(
+        (entry) => entry.activeSprintId === selectedSprint.id
+      )
+    : null
+  const topContributor = selectedSprint?.assignees
+    ? [...selectedSprint.assignees].sort((a, b) => b.closed - a.closed)[0]
+    : null
+  const currentTicketsClosed =
+    selectedComparison?.activeClosedTickets ?? selectedSprint?.doneTickets ?? 0
+  const currentStoryPointsClosed =
+    selectedComparison?.activeStoryPointsClosed ?? selectedSprint?.storyPointsCompleted ?? 0
 
   const generalMetrics = [
     {
+      title: 'Sprint Delivery',
+      value: metricsLoading ? '--' : currentTicketsClosed,
+      subtitle: selectedSprint ? `Current sprint: ${selectedSprint.name}` : 'Current sprint',
+      icon: CheckCircle2,
+      color: 'from-green-600 to-green-500',
+      trend: metricsLoading ? '...' : '',
+      filter: (
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="text-slate-400">Sprint</span>
+          <select
+            className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+            value={selectedSprint?.id || ''}
+            onChange={(event) => setSelectedSprintId(event.target.value || null)}
+          >
+            {metricValues.activeSprints
+              .slice()
+              .sort((a, b) => b.doneTickets - a.doneTickets || a.name.localeCompare(b.name))
+              .map((sprint) => (
+                <option key={sprint.id} value={sprint.id}>
+                  {sprint.teamKey} - {sprint.name}
+                </option>
+              ))}
+          </select>
+        </div>
+      ),
+      rows: selectedSprint
+        ? [
+            {
+              label: 'Team size',
+              value: `${selectedSprint.assignees.length} devs`,
+            },
+            {
+              label: 'Board tickets',
+              value: `${selectedSprint.totalTickets}`,
+            },
+            {
+              label: 'Story points (total)',
+              value: `${selectedSprint.storyPointsTotal}`,
+            },
+            {
+              label: 'Tickets closed',
+              value: selectedComparison
+                ? `${currentTicketsClosed} (prev ${selectedComparison.previousClosedTickets})`
+                : `${currentTicketsClosed}`,
+              href: `/sprints?sprintId=${selectedSprint.id}&filter=active&closedOnly=1`,
+            },
+            {
+              label: 'Story points closed',
+              value: selectedComparison
+                ? `${currentStoryPointsClosed} (prev ${selectedComparison.previousStoryPointsClosed})`
+                : `${currentStoryPointsClosed}`,
+              href: `/sprints?sprintId=${selectedSprint.id}&filter=active&closedOnly=1`,
+            },
+            {
+              label: 'Top contributor',
+              value: topContributor ? `${topContributor.name} (${topContributor.closed} SP)` : '--',
+            },
+            selectedComparison?.previousSprintId
+              ? {
+                  label: `Previous sprint (${selectedComparison.periodDays}d)`,
+                  value: selectedComparison.previousSprintName || 'Previous',
+                  href: `/sprints?sprintId=${selectedComparison.previousSprintId}&filter=completed&closedOnly=1`,
+                }
+              : null,
+          ].filter(Boolean)
+        : [],
+    },
+    {
       title: 'Active Sprints',
       value: metricValues.activeSprintCount ?? '--',
-      subtitle: 'Success % + days left',
+      subtitle: 'Current sprint delivery status',
       icon: BarChart3,
       color: 'from-blue-600 to-blue-500',
       trend: metricsLoading ? '...' : '',
       href: '/sprints?filter=active',
-      rows: metricValues.activeSprints.map((sprint) => ({
-        label: sprint.name,
-        value: `${sprint.successPercent}% | ${sprint.daysLeft}d`,
-      })),
+      filter: (
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="text-slate-400">Sprint</span>
+          <select
+            className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+            value={currentActiveSprint?.id || ''}
+            onChange={(event) => setSelectedActiveSprintId(event.target.value || null)}
+          >
+            {activeSprintByEnd.map((sprint) => (
+              <option key={sprint.id} value={sprint.id}>
+                {sprint.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ),
+      rows: currentActiveSprint
+        ? [
+            {
+              label: `Sprint`,
+              value: currentActiveSprint.name,
+              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active`,
+            },
+            {
+              label: 'Success rate',
+              value: `${currentSprintSuccessPercent}%`,
+              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active`,
+            },
+            {
+              label: 'Days left',
+              value: `${currentActiveSprint.daysLeft}d`,
+              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active`,
+            },
+            {
+              label: 'Planned tickets',
+              value: `${currentActiveSprint.totalTickets}`,
+              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active`,
+            },
+            {
+              label: 'Final phase tickets',
+              value: `${currentSprintSuccessCount}`,
+              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active`,
+            },
+          ]
+        : [],
     },
     {
-      title: 'Development Tickets',
-      value: metricsLoading ? '--' : totalDevTickets,
-      subtitle: 'In progress per sprint',
+      title: 'Tickets In Development',
+      value: metricsLoading ? '--' : `${totalDevTickets} / ${totalQaTickets}`,
+      subtitle: 'Dev / QA (active)',
       icon: Zap,
       color: 'from-purple-600 to-purple-500',
       trend: metricsLoading ? '...' : '',
+      href: '/sprints?filter=active',
       rows: metricValues.activeSprints.map((sprint) => ({
         label: sprint.name,
-        value: `${sprint.devTickets}`,
-        href: `/sprints?sprintId=${sprint.id}&devOnly=1`,
+        value: `${sprint.devTickets} / ${sprint.qaTickets}`,
+        href: `/sprints?sprintId=${sprint.id}&filter=active&devOnly=1`,
       })),
     },
     {
@@ -230,19 +415,6 @@ export default function Dashboard() {
       rows: metricValues.activeSprints.map((sprint) => ({
         label: sprint.name,
         value: `${sprint.bounceBackPercent}%`,
-      })),
-    },
-    {
-      title: 'Tickets Finished',
-      value: metricsLoading ? '--' : totalClosedTickets,
-      subtitle: 'Finished per sprint',
-      icon: CheckCircle2,
-      color: 'from-green-600 to-green-500',
-      trend: metricsLoading ? '...' : '',
-      rows: metricValues.activeSprints.map((sprint) => ({
-        label: sprint.name,
-        value: `${sprint.doneTickets}`,
-        href: `/sprints?sprintId=${sprint.id}&closedOnly=1`,
       })),
     },
     {
