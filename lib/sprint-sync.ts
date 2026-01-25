@@ -411,7 +411,9 @@ async function syncSprintIssuesLite(
   credentials?: JiraCredentials,
   storyPointsFieldId?: string | null
 ) {
-  const issues = jiraSprint.issues || (await getSprintIssues(jiraSprint.id, credentials))
+  const issues =
+    jiraSprint.issues ||
+    (await getSprintIssues(jiraSprint.id, credentials, jiraSprint.boardId))
   if (!issues || issues.length === 0) {
     if (jiraSprint.boardId) {
       const report = (await getSprintReport(
@@ -523,6 +525,10 @@ async function syncSprintIssuesLite(
         sprintHistory: true,
         jiraClosedAt: true,
         jiraCreatedAt: true,
+        sprintId: true,
+        sprint: {
+          select: { status: true },
+        },
       },
     })
     const prCount = existingTicket
@@ -542,10 +548,16 @@ async function syncSprintIssuesLite(
     const jiraCreatedAt = issueNormalized.createdAt ?? existingTicket?.jiraCreatedAt ?? null
     const jiraClosedAt = existingTicket?.jiraClosedAt ?? null
 
+    const shouldOverrideSprint =
+      !existingTicket?.sprint ||
+      ['COMPLETED', 'CLOSED'].includes(existingTicket.sprint.status || '')
+    const targetSprintId =
+      shouldOverrideSprint || !existingTicket?.sprintId ? sprintId : existingTicket.sprintId
+
     await prisma.ticket.upsert({
       where: { jiraId: issueNormalized.jiraId },
       update: {
-        sprintId,
+        sprintId: targetSprintId,
         summary: issueNormalized.summary,
         description: issueNormalized.description,
         status: issueNormalized.status,

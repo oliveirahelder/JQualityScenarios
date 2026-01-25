@@ -16,11 +16,12 @@ import {
 type MetricValueCell =
   | string
   | number
-  | { value: string | number; href: string }
+  | { value: string | number; href?: string; className?: string }
 
 type MetricRowSimple = {
   label: string
-  value: string | number
+  labelTitle?: string
+  value: string | number | { value: string | number; className?: string }
   href?: string
 }
 
@@ -73,6 +74,7 @@ export default function Dashboard() {
       storyPointsCompleted: number
       totalTickets: number
       closedTickets: number
+      finalPhaseTickets: number
       assignees: Array<{ name: string; total: number; closed: number }>
     }>,
     storyPoints: {
@@ -228,7 +230,7 @@ export default function Dashboard() {
     metricValues.activeSprints.find((sprint) => sprint.id === selectedActiveSprintId) ||
     activeSprintByEnd[0]
   const currentSprintSuccessCount = currentActiveSprint
-    ? currentActiveSprint.qaReadyTickets + currentActiveSprint.doneTickets
+    ? currentActiveSprint.finalPhaseTickets
     : 0
   const currentSprintSuccessPercent = currentActiveSprint?.totalTickets
     ? Math.round((currentSprintSuccessCount / currentActiveSprint.totalTickets) * 1000) / 10
@@ -368,11 +370,15 @@ export default function Dashboard() {
             {
               label: 'Success rate',
               value: `${currentSprintSuccessPercent}%`,
-              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active`,
+              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active&finalOnly=1`,
             },
             {
               label: 'Days left',
-              value: `${currentActiveSprint.daysLeft}d`,
+              value: {
+                value: `${currentActiveSprint.daysLeft}d`,
+                className:
+                  currentActiveSprint.daysLeft < 0 ? 'text-red-400' : 'text-slate-100',
+              },
               href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active`,
             },
             {
@@ -383,7 +389,9 @@ export default function Dashboard() {
             {
               label: 'Final phase tickets',
               value: `${currentSprintSuccessCount}`,
-              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active`,
+              labelTitle:
+                'Final phase = Awaiting Approval, Ready for Release, In Release, Done, Closed',
+              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active&finalOnly=1`,
             },
           ]
         : [],
@@ -600,10 +608,14 @@ export default function Dashboard() {
                           >
                             {values.map((value, valueIndex) => {
                               const content =
-                                typeof value === 'object' && value && value.href ? (
-                                  <Link href={value.href} className="text-blue-300 hover:text-blue-200">
-                                    {value.value}
-                                  </Link>
+                                typeof value === 'object' && value && 'value' in value ? (
+                                  value.href ? (
+                                    <Link href={value.href} className="text-blue-300 hover:text-blue-200">
+                                      {value.value}
+                                    </Link>
+                                  ) : (
+                                    value.value
+                                  )
                                 ) : (
                                   value
                                 )
@@ -631,10 +643,14 @@ export default function Dashboard() {
                     >
                       {row.columns.map((value, valueIndex: number) => {
                         const content =
-                          typeof value === 'object' && value && value.href ? (
-                            <Link href={value.href} className="text-blue-300 hover:text-blue-200">
-                              {value.value}
-                            </Link>
+                          typeof value === 'object' && value && 'value' in value ? (
+                            value.href ? (
+                              <Link href={value.href} className="text-blue-300 hover:text-blue-200">
+                                {value.value}
+                              </Link>
+                            ) : (
+                              value.value
+                            )
                           ) : (
                             value
                           )
@@ -647,15 +663,29 @@ export default function Dashboard() {
                     </div>
                   )
                 }
+                const rawValue = 'value' in row ? row.value : ''
+                const valueContent =
+                  typeof rawValue === 'object' && rawValue !== null && 'value' in rawValue
+                    ? rawValue.value
+                    : rawValue
+                const valueClassName =
+                  typeof rawValue === 'object' && rawValue !== null && rawValue.className
+                    ? rawValue.className
+                    : 'text-slate-100'
                 const rowContent = (
                   <div
                     className={`flex items-center justify-between gap-3 rounded-lg bg-slate-900/40 px-2.5 py-1.5 ${
                       'href' in row && row.href ? 'hover:bg-slate-900/60 transition-colors' : ''
                     }`}
                   >
-                    <span className="truncate">{row.label}</span>
-                    <span className="text-slate-100 font-semibold">
-                      {'value' in row ? row.value : ''}
+                    <span
+                      className="truncate"
+                      title={'labelTitle' in row && row.labelTitle ? row.labelTitle : row.label}
+                    >
+                      {row.label}
+                    </span>
+                    <span className={`${valueClassName} font-semibold`}>
+                      {valueContent as string | number}
                     </span>
                   </div>
                 )

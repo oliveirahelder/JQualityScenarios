@@ -366,7 +366,8 @@ export async function getActiveSprintsFromBoard(
  */
 export async function getSprintIssues(
   sprintId: number,
-  credentials?: JiraCredentials
+  credentials?: JiraCredentials,
+  boardId?: number
 ): Promise<JiraIssue[]> {
   try {
     const results: JiraIssue[] = []
@@ -387,6 +388,74 @@ export async function getSprintIssues(
       if (!issues.length) break
       if (total != null && startAt + issues.length >= total) break
       startAt += pageSize || issues.length
+    }
+
+    if (boardId) {
+      try {
+        const report = await getSprintReport(boardId, sprintId, credentials)
+        const completed =
+          (report as {
+            contents?: {
+              completedIssues?: Array<{
+                key?: string
+                summary?: string
+                statusName?: string
+              }>
+            }
+          })?.contents?.completedIssues || []
+        const notCompleted = (report as {
+          contents?: {
+            issuesNotCompletedInCurrentSprint?: Array<{
+              key?: string
+              summary?: string
+              statusName?: string
+            }>
+          }
+        })?.contents?.issuesNotCompletedInCurrentSprint || []
+        const reportIssues = [...completed, ...notCompleted]
+        const reportKeys = reportIssues
+          .map((issue) => issue?.key)
+          .filter((key): key is string => Boolean(key))
+        const reportIssueMap = new Map(
+          reportIssues
+            .filter((issue) => issue?.key)
+            .map((issue) => [issue.key as string, issue])
+        )
+        const existingKeys = new Set(results.map((issue) => issue.key))
+        const missingKeys = reportKeys.filter((key) => !existingKeys.has(key))
+        for (const key of missingKeys) {
+          const issue = await getIssueByKey(key, credentials)
+          if (issue) {
+            results.push(issue)
+            existingKeys.add(issue.key)
+            continue
+          }
+          const reportIssue = reportIssueMap.get(key)
+          if (reportIssue) {
+            results.push({
+              id: key,
+              key,
+              fields: {
+                summary: reportIssue.summary || key,
+                status: { name: reportIssue.statusName || 'Unknown' },
+              },
+            } as JiraIssue)
+            existingKeys.add(key)
+          }
+        }
+
+        if (reportKeys.length > results.length) {
+          const jqlIssues = await getIssuesBySprintJql(sprintId, credentials)
+          for (const issue of jqlIssues) {
+            if (!existingKeys.has(issue.key)) {
+              results.push(issue)
+              existingKeys.add(issue.key)
+            }
+          }
+        }
+      } catch (reportError) {
+        console.warn(`[Jira] Failed to enrich sprint issues for ${sprintId}:`, reportError)
+      }
     }
 
     return results
@@ -419,6 +488,56 @@ export async function getAllBoards(credentials?: JiraCredentials): Promise<JiraB
   }
 }
 
+async function getIssueByKey(
+  issueKey: string,
+  credentials?: JiraCredentials
+): Promise<JiraIssue | null> {
+  try {
+    const response = await getCoreClient(credentials).get(`/issue/${issueKey}`, {
+      params: {
+        fields: 'summary,description,status,assignee,priority,created,issuetype',
+      },
+    })
+    return response.data as JiraIssue
+  } catch (error) {
+    const axiosError = error as AxiosError
+    const errorMessage = axiosError.response?.data || axiosError.message || 'Unknown error'
+    console.warn(`[Jira] Failed to fetch issue ${issueKey}:`, errorMessage)
+    return null
+  }
+}
+
+async function getIssuesBySprintJql(
+  sprintId: number,
+  credentials?: JiraCredentials
+): Promise<JiraIssue[]> {
+  try {
+    const results: JiraIssue[] = []
+    let startAt = 0
+    const maxResults = 50
+    while (true) {
+      const response = await getCoreClient(credentials).get('/search', {
+        params: {
+          jql: `Sprint = ${sprintId}`,
+          fields: 'summary,description,status,assignee,priority,created,issuetype',
+          startAt,
+          maxResults,
+        },
+      })
+      const issues = response.data.issues || []
+      results.push(...issues)
+      if (issues.length < maxResults) break
+      startAt += maxResults
+    }
+    return results
+  } catch (error) {
+    const axiosError = error as AxiosError
+    const errorMessage = axiosError.response?.data || axiosError.message || 'Unknown error'
+    console.warn(`[Jira] Failed to fetch issues via JQL for sprint ${sprintId}:`, errorMessage)
+    return []
+  }
+}
+
 /**
  * Fetch active sprints from all boards
  */
@@ -433,7 +552,7 @@ export async function getActiveSprints(
       const activeSprints = await getActiveSprintsFromBoard(boardId, credentials)
 
       for (const sprint of activeSprints) {
-        const issues = await getSprintIssues(sprint.id, credentials)
+        const issues = await getSprintIssues(sprint.id, credentials, sprint.boardId)
         allSprints.push({
           ...sprint,
           issues,

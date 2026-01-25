@@ -72,7 +72,7 @@ export default function SprintsPage() {
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all')
   const [selectedSprintName, setSelectedSprintName] = useState('')
   const [filterBySprint, setFilterBySprint] = useState<
-    Record<string, 'all' | 'dev' | 'qa' | 'closed' | 'bounce'>
+    Record<string, 'all' | 'dev' | 'qa' | 'closed' | 'bounce' | 'final'>
   >({})
   const [sortBySprint, setSortBySprint] = useState<
     Record<string, 'status' | 'story' | 'bounce'>
@@ -142,7 +142,7 @@ export default function SprintsPage() {
     const now = new Date()
     const diffMs = end.getTime() - now.getTime()
     const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
-    return diffDays < 0 ? '0' : diffDays.toString()
+    return diffDays.toString()
   }
 
   const getLastSyncTime = (lastSyncedAt: Date | string | undefined) => {
@@ -355,6 +355,7 @@ export default function SprintsPage() {
     const qaOnly = searchParams.get('qaOnly') === '1'
     const closedOnly = searchParams.get('closedOnly') === '1'
     const bounceOnly = searchParams.get('bounceOnly') === '1'
+    const finalOnly = searchParams.get('finalOnly') === '1'
     const assignee = searchParams.get('assignee')
     const nextFilter = devOnly
       ? 'dev'
@@ -364,6 +365,8 @@ export default function SprintsPage() {
       ? 'closed'
       : bounceOnly
       ? 'bounce'
+      : finalOnly
+      ? 'final'
       : 'all'
     if (sprintId) {
       setFilterBySprint((prev) => ({
@@ -385,7 +388,7 @@ export default function SprintsPage() {
     if (assignee) {
       const decoded = decodeURIComponent(assignee)
       const nextAssigneeFilters: Record<string, string> = {}
-      const nextFilters: Record<string, 'all' | 'dev' | 'closed' | 'bounce'> = {}
+      const nextFilters: Record<string, 'all' | 'dev' | 'qa' | 'closed' | 'bounce' | 'final'> = {}
       const nextExpanded: Record<string, boolean> = {}
       for (const sprint of sprints) {
         nextAssigneeFilters[sprint.id] = decoded
@@ -722,7 +725,8 @@ export default function SprintsPage() {
                                       | 'dev'
                                       | 'qa'
                                       | 'closed'
-                                      | 'bounce',
+                                      | 'bounce'
+                                      | 'final',
                                   }))
                                 }
                                 className="bg-slate-900/40 border border-slate-700/50 text-slate-200 text-xs rounded-md px-2 py-1"
@@ -730,6 +734,7 @@ export default function SprintsPage() {
                                 <option value="all">All tickets</option>
                                 <option value="dev">In Dev only</option>
                                 <option value="qa">In QA only</option>
+                                <option value="final">Final phase only</option>
                                 <option value="closed">Closed only</option>
                                 <option value="bounce">Bounce only</option>
                               </select>
@@ -793,6 +798,9 @@ export default function SprintsPage() {
                               const filtered = (sprint.tickets || []).filter((ticket: SprintTicket) => {
                                 if (filterValue === 'dev' && !isDevStatus(ticket.status || undefined)) return false
                                 if (filterValue === 'qa' && !isQaStatus(ticket.status || undefined)) {
+                                  return false
+                                }
+                                if (filterValue === 'final' && !isQaDoneStatus(ticket.status || undefined)) {
                                   return false
                                 }
                                 if (filterValue === 'closed' && !isClosedStatus(ticket.status || undefined)) {

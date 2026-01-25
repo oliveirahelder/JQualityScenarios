@@ -5,13 +5,8 @@ import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
 import type { JiraCredentials } from '@/lib/jira-config'
 
 const CLOSED_STATUSES = ['closed', 'done']
-const QA_READY_STATUSES = [
-  'ready for release',
-  'awaiting approval',
-  'in release',
-  'done',
-  'closed',
-]
+const QA_READY_STATUSES = ['ready for release', 'awaiting approval', 'in release']
+const FINAL_PHASE_STATUSES = [...QA_READY_STATUSES, 'done', 'closed']
 const QA_ACTIVE_STATUSES = ['in qa']
 const DEV_STATUSES = ['in progress', 'in development', 'in refinement']
 const END_STATUSES = [...QA_READY_STATUSES, ...CLOSED_STATUSES]
@@ -272,6 +267,11 @@ export async function GET(request: NextRequest) {
           (ticket.status || '').toLowerCase().includes(status)
         )
       ).length
+      const finalPhaseTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
+        FINAL_PHASE_STATUSES.some((status) =>
+          (ticket.status || '').toLowerCase().includes(status)
+        )
+      ).length
       const bounceBackTickets = sprint.tickets.filter(
         (ticket: JiraTicketLite) => (ticket.qaBounceBackCount || 0) > 0
       ).length
@@ -288,9 +288,8 @@ export async function GET(request: NextRequest) {
       const storyPointsCompleted = sprint.tickets.reduce((sum: number, ticket: JiraTicketLite) => {
         return sum + (isStrictClosed(ticket.status) ? ticket.storyPoints || 0 : 0)
       }, 0)
-      const daysLeft = Math.max(
-        0,
-        Math.ceil((sprint.endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+      const daysLeft = Math.ceil(
+        (sprint.endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
       )
 
       const assigneeTotals = new Map<string, { total: number; closed: number }>()
@@ -325,6 +324,7 @@ export async function GET(request: NextRequest) {
         qaTickets,
         doneTickets,
         qaReadyTickets,
+        finalPhaseTickets,
         bounceBackPercent,
         bounceBackTickets,
         storyPointsTotal,
