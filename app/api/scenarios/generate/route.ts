@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
-import { fetchJiraTicket, parseJiraXml, generateScenariosWithAI } from '@/lib/jira-service'
+import {
+  fetchJiraTicket,
+  parseJiraXml,
+  generateScenariosWithAI,
+} from '@/lib/jira-service'
 import { prisma } from '@/lib/prisma'
 import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
 
@@ -20,6 +24,12 @@ export async function POST(req: NextRequest) {
     const { ticketId, xmlText, confluence } = await req.json()
 
     let jiraDetails
+    let existingTicket: {
+      id: string
+      sprintId: string
+      summary: string | null
+      devInsights: Array<{ prUrl: string | null; prTitle: string | null; prNotes: string | null }>
+    } | null = null
 
     // Fetch Jira ticket details
     if (ticketId) {
@@ -30,11 +40,11 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'User not found' }, { status: 404 })
       }
 
-    const adminSettings = await prisma.adminSettings.findFirst()
-    const jiraCredentials = buildJiraCredentialsFromUser(
-      user,
-      adminSettings?.jiraBaseUrl || null
-    )
+      const adminSettings = await prisma.adminSettings.findFirst()
+      const jiraCredentials = buildJiraCredentialsFromUser(
+        user,
+        adminSettings?.jiraBaseUrl || null
+      )
       if (!jiraCredentials) {
         return NextResponse.json(
           { error: 'Jira integration not configured' },
@@ -43,6 +53,28 @@ export async function POST(req: NextRequest) {
       }
 
       jiraDetails = await fetchJiraTicket(ticketId, jiraCredentials)
+      existingTicket = await prisma.ticket.findUnique({
+        where: { jiraId: ticketId },
+        select: {
+          id: true,
+          sprintId: true,
+          summary: true,
+          devInsights: {
+            select: {
+              prUrl: true,
+              prTitle: true,
+              prNotes: true,
+            },
+          },
+        },
+      })
+      if (existingTicket?.devInsights?.length) {
+        jiraDetails.pullRequests = existingTicket.devInsights.map((insight) => ({
+          url: insight.prUrl,
+          title: insight.prTitle,
+          notes: insight.prNotes,
+        }))
+      }
     } else if (xmlText) {
       const parsed = await parseJiraXml(xmlText)
       if (parsed.length === 0) {
@@ -57,11 +89,19 @@ export async function POST(req: NextRequest) {
     }
 
     // Generate scenarios using AI
-    const scenarios = await generateScenariosWithAI(jiraDetails, confluence)
+    const generated = await generateScenariosWithAI(jiraDetails, confluence)
 
     return NextResponse.json({
       jiraDetails,
-      scenarios,
+      ticketRef: existingTicket
+        ? {
+            id: existingTicket.id,
+            sprintId: existingTicket.sprintId,
+            summary: existingTicket.summary || jiraDetails.summary,
+          }
+        : null,
+      scenarios: generated.gherkin,
+      manualScenarios: generated.manual,
       generatedAt: new Date().toISOString(),
     })
   } catch (error) {
