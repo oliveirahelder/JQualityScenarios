@@ -13,7 +13,11 @@ type JiraChangelogItem = {
 
 type JiraIssuePayload = {
   key?: string
-  fields?: Record<string, unknown>
+  fields?: Record<string, unknown> & {
+    issuetype?: {
+      name?: string
+    }
+  }
 }
 
 type JiraSprintPayload = {
@@ -151,6 +155,9 @@ async function handleIssueCreated(body: JiraWebhookBody) {
     const grossTime = Math.ceil(
       (new Date().getTime() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24)
     )
+    const createdValue = issue.fields?.created
+    const jiraCreatedAt =
+      typeof createdValue === 'string' ? new Date(createdValue) : null
 
     await prisma.ticket.create({
       data: {
@@ -158,10 +165,12 @@ async function handleIssueCreated(body: JiraWebhookBody) {
         jiraId: normalized.jiraId,
         summary: normalized.summary,
         description: normalized.description,
-        status: 'TODO',
+        status: normalized.status,
         assignee: normalized.assignee,
         priority: normalized.priority,
+        issueType: normalized.issueType || null,
         grossTime: Math.max(0, grossTime),
+        jiraCreatedAt,
       },
     })
 
@@ -201,9 +210,16 @@ async function handleIssueUpdated(body: JiraWebhookBody) {
 
     if (statusChange) {
       const newStatus = statusChange.toString || statusChange.to || 'IN_PROGRESS'
+      const statusValue = newStatus.toString().toLowerCase()
+      const jiraClosedAt =
+        (statusValue.includes('closed') || statusValue.includes('done')) &&
+        !statusValue.includes('canceled') &&
+        !statusValue.includes('cancelled')
+          ? new Date()
+          : undefined
       await prisma.ticket.update({
         where: { id: ticket.id },
-        data: { status: newStatus as string },
+        data: { status: newStatus as string, jiraClosedAt },
       })
     }
 

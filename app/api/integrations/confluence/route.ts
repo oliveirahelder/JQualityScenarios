@@ -22,8 +22,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
+    const adminSettings = await prisma.adminSettings.findFirst()
     return NextResponse.json({
-      baseUrl: user.confluenceBaseUrl || '',
+      baseUrl:
+        adminSettings?.confluenceBaseUrl ||
+        user.confluenceBaseUrl ||
+        process.env.CONFLUENCE_BASE_URL ||
+        '',
       hasToken: Boolean(user.confluenceApiToken),
       connectionStatus: user.confluenceConnectionStatus || '',
       connectionCheckedAt: user.confluenceConnectionCheckedAt?.toISOString() || '',
@@ -48,6 +53,7 @@ export async function PUT(req: NextRequest) {
     if (!payload) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
     }
+    const isAdmin = ['ADMIN', 'DEVOPS'].includes(payload.role)
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -60,7 +66,7 @@ export async function PUT(req: NextRequest) {
     const { baseUrl, token: confluenceToken } = await req.json()
 
     const normalizedBaseUrl =
-      typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : ''
+      typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : undefined
 
     const updateData: {
       confluenceBaseUrl?: string | null
@@ -69,16 +75,31 @@ export async function PUT(req: NextRequest) {
       confluenceDeployment?: string | null
       confluenceConnectionStatus?: string | null
       confluenceConnectionCheckedAt?: Date | null
-    } = {
-      confluenceBaseUrl: normalizedBaseUrl || null,
-      confluenceAuthType: 'bearer',
-      confluenceDeployment: 'datacenter',
-      confluenceConnectionStatus: null,
-      confluenceConnectionCheckedAt: null,
+    } = {}
+
+    if (typeof normalizedBaseUrl === 'string' && isAdmin) {
+      const existing = await prisma.adminSettings.findFirst()
+      if (existing) {
+        await prisma.adminSettings.update({
+          where: { id: existing.id },
+          data: { confluenceBaseUrl: normalizedBaseUrl || null },
+        })
+      } else {
+        await prisma.adminSettings.create({
+          data: { confluenceBaseUrl: normalizedBaseUrl || null },
+        })
+      }
     }
 
     if (confluenceToken) {
       updateData.confluenceApiToken = confluenceToken
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      updateData.confluenceAuthType = 'bearer'
+      updateData.confluenceDeployment = 'datacenter'
+      updateData.confluenceConnectionStatus = null
+      updateData.confluenceConnectionCheckedAt = null
     }
 
     await prisma.user.update({

@@ -42,8 +42,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    const jiraCredentials = buildJiraCredentialsFromUser(user)
-    const confluenceCredentials = buildConfluenceCredentialsFromUser(user)
+    const adminSettings = await prisma.adminSettings.findFirst()
+    const jiraCredentials = buildJiraCredentialsFromUser(
+      user,
+      adminSettings?.jiraBaseUrl || null
+    )
+    const confluenceCredentials = buildConfluenceCredentialsFromUser(
+      user,
+      adminSettings?.confluenceBaseUrl || null
+    )
 
     // Get search query and type
     const { searchParams } = new URL(request.url)

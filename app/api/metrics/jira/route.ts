@@ -4,19 +4,33 @@ import { prisma } from '@/lib/prisma'
 import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
 import type { JiraCredentials } from '@/lib/jira-config'
 
-const CLOSED_STATUSES = ['closed', 'done', 'resolved']
+const CLOSED_STATUSES = ['closed', 'done']
 const QA_READY_STATUSES = [
   'ready for release',
-  'waiting for approval',
   'awaiting approval',
   'in release',
+  'done',
+  'closed',
 ]
 const QA_ACTIVE_STATUSES = ['in qa']
 const DEV_STATUSES = ['in progress', 'in development', 'in refinement']
 const END_STATUSES = [...QA_READY_STATUSES, ...CLOSED_STATUSES]
+const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
+const MAX_SPRINTS_PER_TEAM_LIMIT = 50
 
 const METRICS_CACHE_TTL_MS = 30_000
 const metricsCache = new Map<string, { timestamp: number; payload: unknown }>()
+
+type TicketTimeEntry = {
+  jiraId: string
+  summary: string
+  assignee: string
+  workHours: number
+  storyPoints: number
+  hoursPerStoryPoint: number | null
+  devStart: string
+  endAt: string
+}
 
 type JiraTicketLite = {
   status?: string | null
@@ -54,8 +68,43 @@ function getTeamKey(name: string) {
   return match ? match[0].toUpperCase() : trimmed.toUpperCase()
 }
 
+function clampSprintsToSync(value?: number | null) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.min(Math.max(Math.floor(value), 1), MAX_SPRINTS_PER_TEAM_LIMIT)
+  }
+  return DEFAULT_SPRINTS_PER_TEAM_LIMIT
+}
+
+function limitByTeam<T extends { name: string; endDate: Date }>(items: T[], limit: number) {
+  const sorted = [...items].sort((a, b) => b.endDate.getTime() - a.endDate.getTime())
+  const grouped = new Map<string, T[]>()
+  for (const item of sorted) {
+    const key = getTeamKey(item.name)
+    const list = grouped.get(key) || []
+    if (list.length < limit) {
+      list.push(item)
+      grouped.set(key, list)
+    }
+  }
+  return Array.from(grouped.values()).flat().sort((a, b) => b.endDate.getTime() - a.endDate.getTime())
+}
+
+function parseSnapshotTotals(value: string | null) {
+  if (!value) return null
+  try {
+    return JSON.parse(value) as {
+      storyPointsTotal?: number
+      storyPointsClosed?: number
+    }
+  } catch {
+    return null
+  }
+}
+
 function isStrictClosed(status?: string | null) {
-  return (status || '').toLowerCase().includes('closed')
+  const value = (status || '').toLowerCase()
+  if (value.includes('canceled') || value.includes('cancelled')) return false
+  return value.includes('closed') || value.includes('done')
 }
 
 function isBusinessDay(date: Date) {
@@ -172,7 +221,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    const jiraCredentials = buildJiraCredentialsFromUser(user)
+    const adminSettings = await prisma.adminSettings.findFirst()
+    const sprintsToSync = clampSprintsToSync(adminSettings?.sprintsToSync)
+    const jiraCredentials = buildJiraCredentialsFromUser(
+      user,
+      adminSettings?.jiraBaseUrl || null
+    )
     if (!jiraCredentials) {
       return NextResponse.json({ error: 'Jira integration not configured' }, { status: 400 })
     }
@@ -333,11 +387,28 @@ export async function GET(request: NextRequest) {
         totalHours: number
         averageHours: number
         ticketCount: number
-      }>
+          }>
+    }> = []
+    const deliveryTicketTimesBySprint: Array<{
+      sprintId: string
+      sprintName: string
+      sprintStart: string
+      sprintEnd: string
+      tickets: TicketTimeEntry[]
     }> = []
 
     if (includeDeliveryTimes) {
       for (const sprint of activeSprints) {
+        const ticketMeta = new Map<string, { summary: string; storyPoints: number; assignee: string }>()
+        for (const ticket of sprint.tickets || []) {
+          if (!ticket.jiraId) continue
+          ticketMeta.set(ticket.jiraId, {
+            summary: ticket.summary || '',
+            storyPoints: ticket.storyPoints || 0,
+            assignee: ticket.assignee || '',
+          })
+        }
+        const ticketTimes: TicketTimeEntry[] = []
         const sprintHours = new Map<
           string,
           { totalHours: number; ticketCount: number; startedCount: number; endedInSprintCount: number }
@@ -352,6 +423,19 @@ export async function GET(request: NextRequest) {
           )
           if (!timing) continue
           const assigneeName = timing.assigneeAtStart || ticket.assignee
+          const meta = ticketMeta.get(ticket.jiraId)
+          const storyPoints = meta?.storyPoints || 0
+          ticketTimes.push({
+            jiraId: ticket.jiraId,
+            summary: meta?.summary || ticket.summary || '',
+            assignee: assigneeName,
+            workHours: Math.round(timing.workHours * 10) / 10,
+            storyPoints,
+            hoursPerStoryPoint:
+              storyPoints > 0 ? Math.round((timing.workHours / storyPoints) * 10) / 10 : null,
+            devStart: timing.devStart.toISOString(),
+            endAt: timing.endAt.toISOString(),
+          })
           const sprintEntry = sprintHours.get(assigneeName) || {
             totalHours: 0,
             ticketCount: 0,
@@ -401,6 +485,13 @@ export async function GET(request: NextRequest) {
           sprintName: sprint.name,
           entries: sprintEntries,
         })
+        deliveryTicketTimesBySprint.push({
+          sprintId: sprint.id,
+          sprintName: sprint.name,
+          sprintStart: sprint.startDate.toISOString(),
+          sprintEnd: sprint.endDate.toISOString(),
+          tickets: ticketTimes,
+        })
       }
     }
     const deliveryTimes = Array.from(workHoursByAssignee.entries())
@@ -415,11 +506,29 @@ export async function GET(request: NextRequest) {
       }))
       .sort((a, b) => b.ticketCount - a.ticketCount || a.name.localeCompare(b.name))
 
-    const lastSprintSnapshots = await prisma.sprintSnapshot.findMany({
+    const lastSprintSnapshotsRaw = await prisma.sprintSnapshot.findMany({
       where: { status: { in: ['COMPLETED', 'CLOSED'] } },
       orderBy: { endDate: 'desc' },
-      take: 5,
+      take: 200,
     })
+    const lastSprintSnapshots = limitByTeam(lastSprintSnapshotsRaw, sprintsToSync)
+    const storyPointAveragesByTeam = new Map<
+      string,
+      { total: number; closed: number; sprintCount: number }
+    >()
+    for (const snapshot of lastSprintSnapshots) {
+      const key = getTeamKey(snapshot.name)
+      const totals = parseSnapshotTotals(snapshot.totals)
+      const entry = storyPointAveragesByTeam.get(key) || {
+        total: 0,
+        closed: 0,
+        sprintCount: 0,
+      }
+      entry.total += totals?.storyPointsTotal ?? 0
+      entry.closed += totals?.storyPointsClosed ?? 0
+      entry.sprintCount += 1
+      storyPointAveragesByTeam.set(key, entry)
+    }
 
     const storyPointAverages = new Map<string, { total: number; closed: number; sprintCount: number }>()
     for (const snapshot of lastSprintSnapshots) {
@@ -475,12 +584,65 @@ export async function GET(request: NextRequest) {
         storyPointSprintCount: storyPointAveragesMap.get(entry.name)?.sprintCount ?? 0,
       })),
     }))
-    const previousSprints = (await prisma.sprint.findMany({
+
+    const capacityByDeveloper = new Map<string, { totalSpPerDay: number; sprintCount: number }>()
+    for (const snapshot of lastSprintSnapshots) {
+      const sprintStart = new Date(snapshot.startDate)
+      const sprintEnd = new Date(snapshot.endDate)
+      const sprintDays = businessHoursBetween(sprintStart, sprintEnd) / 8
+      if (!sprintDays) continue
+      const ticketTimes = snapshot.ticketTimes ? JSON.parse(snapshot.ticketTimes) : []
+      if (Array.isArray(ticketTimes) && ticketTimes.length > 0) {
+        for (const entry of ticketTimes as Array<{
+          assignee?: string
+          storyPoints?: number
+          devStart?: string
+          endAt?: string
+        }>) {
+          if (!entry.assignee || !entry.storyPoints) continue
+          if (entry.devStart && entry.endAt) {
+            const devStart = new Date(entry.devStart)
+            const endAt = new Date(entry.endAt)
+            if (devStart < sprintStart || endAt > sprintEnd) continue
+          }
+          const record = capacityByDeveloper.get(entry.assignee) || {
+            totalSpPerDay: 0,
+            sprintCount: 0,
+          }
+          record.totalSpPerDay += entry.storyPoints / sprintDays
+          record.sprintCount += 1
+          capacityByDeveloper.set(entry.assignee, record)
+        }
+      } else {
+        const assignees = snapshot.assignees ? JSON.parse(snapshot.assignees) : []
+        if (!Array.isArray(assignees)) continue
+        for (const assignee of assignees as Array<{ name?: string; closedPoints?: number }>) {
+          if (!assignee.name || !assignee.closedPoints) continue
+          const record = capacityByDeveloper.get(assignee.name) || {
+            totalSpPerDay: 0,
+            sprintCount: 0,
+          }
+          record.totalSpPerDay += assignee.closedPoints / sprintDays
+          record.sprintCount += 1
+          capacityByDeveloper.set(assignee.name, record)
+        }
+      }
+    }
+
+    const capacityAverages = Array.from(capacityByDeveloper.entries()).map(([name, entry]) => ({
+      name,
+      avgSpPerDay: entry.sprintCount
+        ? Math.round((entry.totalSpPerDay / entry.sprintCount) * 10) / 10
+        : 0,
+      sprintCount: entry.sprintCount,
+    }))
+    const previousSprintsRaw = (await prisma.sprint.findMany({
       where: { status: { in: ['CLOSED', 'COMPLETED'] } },
       include: { tickets: true },
       orderBy: { endDate: 'desc' },
-      take: 50,
+      take: 200,
     })) as SprintWithTickets[]
+    const previousSprints = limitByTeam(previousSprintsRaw, sprintsToSync) as SprintWithTickets[]
     const previousSprint = previousSprints[0] || null
     const primaryActiveSprint = activeSprints[0] || null
     const elapsedDays =
@@ -588,6 +750,45 @@ export async function GET(request: NextRequest) {
       }
     })
 
+    const storyPointsByTeam = activeSprints.map((sprint) => {
+      const teamKey = getTeamKey(sprint.name)
+      const previousForTeam = previousSprintsByTeam.get(teamKey)?.[0] || null
+      const previousStoryPointsTotal = previousForTeam
+        ? previousForTeam.storyPointsTotal > 0
+          ? previousForTeam.storyPointsTotal
+          : previousForTeam.tickets.reduce(
+              (sum: number, ticket: JiraTicketLite) => sum + (ticket.storyPoints || 0),
+              0
+            )
+        : 0
+      const previousStoryPointsClosed = previousForTeam
+        ? previousForTeam.tickets.reduce((sum: number, ticket: JiraTicketLite) => {
+            return sum + (isStrictClosed(ticket.status) ? ticket.storyPoints || 0 : 0)
+          }, 0)
+        : 0
+      const averages = storyPointAveragesByTeam.get(teamKey)
+      return {
+        teamKey,
+        activeSprintId: sprint.id,
+        activeSprintName: sprint.name,
+        activeStoryPointsTotal: sprint.storyPointsTotal,
+        activeStoryPointsClosed: sprint.storyPointsCompleted,
+        previousSprintId: previousForTeam?.id ?? null,
+        previousSprintName: previousForTeam?.name ?? null,
+        previousStoryPointsTotal,
+        previousStoryPointsClosed,
+        averageStoryPointsTotal:
+          averages && averages.sprintCount
+            ? Math.round((averages.total / averages.sprintCount) * 10) / 10
+            : 0,
+        averageStoryPointsClosed:
+          averages && averages.sprintCount
+            ? Math.round((averages.closed / averages.sprintCount) * 10) / 10
+            : 0,
+        averageSprintCount: averages?.sprintCount ?? 0,
+      }
+    })
+
     const responsePayload = {
       activeSprintCount: activeSprintMetrics.length,
       activeSprints: activeSprintMetrics,
@@ -610,10 +811,13 @@ export async function GET(request: NextRequest) {
           }
         : null,
       finishedComparisonByTeam,
+      storyPointsByTeam,
       assignees,
       deliveryTimes: includeDeliveryTimes ? deliveryTimesWithPoints : [],
       deliveryTimesBySprint: includeDeliveryTimes ? deliveryTimesBySprintWithPoints : [],
+      deliveryTicketTimesBySprint: includeDeliveryTimes ? deliveryTicketTimesBySprint : [],
       storyPointAverages: storyPointAveragesList,
+      capacityAverages,
     }
 
     metricsCache.set(cacheKey, {

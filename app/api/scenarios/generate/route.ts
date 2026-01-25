@@ -30,7 +30,11 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'User not found' }, { status: 404 })
       }
 
-      const jiraCredentials = buildJiraCredentialsFromUser(user)
+    const adminSettings = await prisma.adminSettings.findFirst()
+    const jiraCredentials = buildJiraCredentialsFromUser(
+      user,
+      adminSettings?.jiraBaseUrl || null
+    )
       if (!jiraCredentials) {
         return NextResponse.json(
           { error: 'Jira integration not configured' },

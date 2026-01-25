@@ -24,6 +24,13 @@ interface ConfluenceSettings {
   connectionCheckedAt?: string
 }
 
+interface GithubSettings {
+  user: string
+  hasToken: boolean
+  connectionStatus?: string
+  connectionCheckedAt?: string
+}
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -62,6 +69,34 @@ export default function SettingsPage() {
     hasToken: false,
   })
 
+  const [githubLoading, setGithubLoading] = useState(true)
+  const [githubSaving, setGithubSaving] = useState(false)
+  const [githubTesting, setGithubTesting] = useState(false)
+  const [githubToken, setGithubToken] = useState('')
+  const [githubError, setGithubError] = useState('')
+  const [githubSuccess, setGithubSuccess] = useState('')
+  const [githubTestResult, setGithubTestResult] = useState<string | null>(null)
+  const [githubTestOk, setGithubTestOk] = useState<boolean | null>(null)
+  const [showGithubConfig, setShowGithubConfig] = useState(false)
+  const [githubSettings, setGithubSettings] = useState<GithubSettings>({
+    user: '',
+    hasToken: false,
+  })
+
+  const [dbStatus, setDbStatus] = useState<'ok' | 'error' | 'checking'>('checking')
+  const [adminJiraBaseUrl, setAdminJiraBaseUrl] = useState('')
+  const [adminConfluenceBaseUrl, setAdminConfluenceBaseUrl] = useState('')
+  const [adminSprintsToSync, setAdminSprintsToSync] = useState('10')
+  const [adminSaving, setAdminSaving] = useState(false)
+  const [adminError, setAdminError] = useState('')
+  const [adminSuccess, setAdminSuccess] = useState('')
+  const [jiraSyncing, setJiraSyncing] = useState(false)
+  const [jiraSyncMessage, setJiraSyncMessage] = useState('')
+  const [jiraSyncError, setJiraSyncError] = useState('')
+  const [jiraLastSyncAt, setJiraLastSyncAt] = useState<string | null>(null)
+  const jiraBaseUrlValue = jiraSettings.baseUrl || adminJiraBaseUrl
+  const confluenceBaseUrlValue = confluenceSettings.baseUrl || adminConfluenceBaseUrl
+
   useEffect(() => {
     const storedUser = localStorage.getItem('user')
     if (storedUser) {
@@ -76,17 +111,32 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => {
+    const stored = localStorage.getItem('jiraLastSyncAt')
+    if (stored) setJiraLastSyncAt(stored)
+  }, [])
+
+  useEffect(() => {
     const loadSettings = async () => {
       try {
         const authToken = localStorage.getItem('token')
-        const [jiraResponse, confluenceResponse] = await Promise.all([
-          fetch('/api/integrations/jira', {
-            headers: { Authorization: `Bearer ${authToken}` },
-          }),
-          fetch('/api/integrations/confluence', {
-            headers: { Authorization: `Bearer ${authToken}` },
-          }),
-        ])
+        const [jiraResponse, confluenceResponse, githubResponse, dbResponse, adminResponse] =
+          await Promise.all([
+            fetch('/api/integrations/jira', {
+              headers: { Authorization: `Bearer ${authToken}` },
+            }),
+            fetch('/api/integrations/confluence', {
+              headers: { Authorization: `Bearer ${authToken}` },
+            }),
+            fetch('/api/integrations/github', {
+              headers: { Authorization: `Bearer ${authToken}` },
+            }),
+            fetch('/api/system/database-status', {
+              headers: { Authorization: `Bearer ${authToken}` },
+            }),
+            fetch('/api/admin/settings', {
+              headers: { Authorization: `Bearer ${authToken}` },
+            }),
+          ])
 
         if (!jiraResponse.ok) {
           const data = await jiraResponse.json()
@@ -122,11 +172,52 @@ export default function SettingsPage() {
             setConfluenceTestResult('Connected (last check within 24h)')
           }
         }
+
+        if (!githubResponse.ok) {
+          const data = await githubResponse.json()
+          throw new Error(data.error || 'Failed to load GitHub settings')
+        }
+
+        if (!adminResponse.ok) {
+          const data = await adminResponse.json()
+          throw new Error(data.error || 'Failed to load admin settings')
+        }
+        const adminData = await adminResponse.json()
+        const nextAdminJiraBaseUrl = adminData?.jiraBaseUrl || ''
+        const nextAdminConfluenceBaseUrl = adminData?.confluenceBaseUrl || ''
+        const nextAdminSprintsToSync =
+          typeof adminData?.sprintsToSync === 'number'
+            ? adminData.sprintsToSync.toString()
+            : '10'
+        setAdminJiraBaseUrl(nextAdminJiraBaseUrl)
+        setAdminConfluenceBaseUrl(nextAdminConfluenceBaseUrl)
+        setAdminSprintsToSync(nextAdminSprintsToSync)
+        if (!jiraData?.baseUrl && nextAdminJiraBaseUrl) {
+          setJiraSettings((prev) => ({ ...prev, baseUrl: nextAdminJiraBaseUrl }))
+        }
+        if (!confluenceData?.baseUrl && nextAdminConfluenceBaseUrl) {
+          setConfluenceSettings((prev) => ({ ...prev, baseUrl: nextAdminConfluenceBaseUrl }))
+        }
+
+        const githubData = await githubResponse.json()
+        setGithubSettings(githubData)
+        if (githubData?.connectionStatus === 'connected' && githubData?.connectionCheckedAt) {
+          const checkedAt = new Date(githubData.connectionCheckedAt)
+          const maxAgeMs = 24 * 60 * 60 * 1000
+          if (!Number.isNaN(checkedAt.getTime()) && Date.now() - checkedAt.getTime() < maxAgeMs) {
+            setGithubTestOk(true)
+            setGithubTestResult('Connected (last check within 24h)')
+          }
+        }
+
+        setDbStatus(dbResponse.ok ? 'ok' : 'error')
       } catch (err) {
         setJiraError(err instanceof Error ? err.message : 'Failed to load Jira settings')
+        setDbStatus('error')
       } finally {
         setJiraLoading(false)
         setConfluenceLoading(false)
+        setGithubLoading(false)
       }
     }
 
@@ -134,13 +225,13 @@ export default function SettingsPage() {
   }, [])
 
   const validateJiraInputs = () => {
-    const trimmedBaseUrl = jiraSettings.baseUrl.trim()
     const trimmedToken = jiraToken.trim()
     const trimmedBoardIds = jiraSettings.boardIds.trim()
     const trimmedBoardUrl = jiraBoardUrl.trim()
+    const trimmedUser = jiraSettings.user.trim()
 
-    if (!trimmedBaseUrl) {
-      return 'Jira Base URL is required.'
+    if (!trimmedUser) {
+      return 'Jira email is required.'
     }
     if (!trimmedToken && !jiraSettings.hasToken) {
       return 'Jira token is required.'
@@ -171,7 +262,7 @@ export default function SettingsPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          baseUrl: jiraSettings.baseUrl,
+          baseUrl: undefined,
           user: jiraSettings.user,
           boardIds: jiraSettings.boardIds,
           boardUrl: jiraBoardUrl,
@@ -241,12 +332,8 @@ export default function SettingsPage() {
   }
 
   const validateConfluenceInputs = () => {
-    const trimmedBaseUrl = confluenceSettings.baseUrl.trim()
     const trimmedToken = confluenceToken.trim()
 
-    if (!trimmedBaseUrl) {
-      return 'Confluence Base URL is required.'
-    }
     if (!trimmedToken && !confluenceSettings.hasToken) {
       return 'Confluence token is required.'
     }
@@ -273,7 +360,7 @@ export default function SettingsPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          baseUrl: confluenceSettings.baseUrl,
+          baseUrl: undefined,
           token: confluenceToken.trim() || undefined,
         }),
       })
@@ -341,13 +428,176 @@ export default function SettingsPage() {
     }
   }
 
+  const validateGithubInputs = () => {
+    const trimmedUser = githubSettings.user.trim()
+    const trimmedToken = githubToken.trim()
+
+    if (!trimmedUser) {
+      return 'GitHub username is required.'
+    }
+    if (!trimmedToken && !githubSettings.hasToken) {
+      return 'GitHub token is required.'
+    }
+    return ''
+  }
+
+  const saveGithubSettings = async () => {
+    setGithubSaving(true)
+    setGithubError('')
+    setGithubSuccess('')
+
+    try {
+      const validationError = validateGithubInputs()
+      if (validationError) {
+        setGithubError(validationError)
+        return false
+      }
+
+      const authToken = localStorage.getItem('token')
+      const response = await fetch('/api/integrations/github', {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user: githubSettings.user,
+          token: githubToken.trim() || undefined,
+        }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to save GitHub settings')
+      }
+
+      setGithubToken('')
+      setGithubSettings((prev) => ({ ...prev, hasToken: prev.hasToken || Boolean(githubToken) }))
+      setGithubSuccess('GitHub connected.')
+      setGithubTestOk(null)
+      setGithubTestResult(null)
+      return true
+    } catch (err) {
+      setGithubError(err instanceof Error ? err.message : 'Failed to save GitHub settings')
+      return false
+    } finally {
+      setGithubSaving(false)
+    }
+  }
+
+  const handleGithubTest = async () => {
+    setGithubTesting(true)
+    setGithubTestResult(null)
+    setGithubTestOk(null)
+    setGithubError('')
+
+    try {
+      const authToken = localStorage.getItem('token')
+      const response = await fetch('/api/integrations/github/test', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` },
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to test GitHub connection')
+      }
+
+      setGithubTestResult(`Connected as ${data.login || data.name || 'GitHub user'}`)
+      setGithubTestOk(true)
+    } catch (err) {
+      setGithubTestResult(null)
+      setGithubTestOk(false)
+      setGithubError(err instanceof Error ? err.message : 'Failed to test GitHub connection')
+    } finally {
+      setGithubTesting(false)
+    }
+  }
+
+  const handleGithubConnect = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const saved = await saveGithubSettings()
+    if (saved) {
+      await handleGithubTest()
+    }
+  }
+
+  const handleAdminSave = async () => {
+    setAdminSaving(true)
+    setAdminError('')
+    setAdminSuccess('')
+
+    try {
+      const parsedSprintsToSync = Number.parseInt(adminSprintsToSync, 10)
+      const normalizedSprintsToSync = Number.isFinite(parsedSprintsToSync)
+        ? parsedSprintsToSync
+        : undefined
+      const authToken = localStorage.getItem('token')
+      const response = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          jiraBaseUrl: adminJiraBaseUrl,
+          confluenceBaseUrl: adminConfluenceBaseUrl,
+          sprintsToSync: normalizedSprintsToSync,
+        }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to save admin settings')
+      }
+
+      setJiraSettings((prev) => ({ ...prev, baseUrl: adminJiraBaseUrl }))
+      setConfluenceSettings((prev) => ({ ...prev, baseUrl: adminConfluenceBaseUrl }))
+      setAdminSuccess('Admin settings updated.')
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : 'Failed to save admin settings')
+    } finally {
+      setAdminSaving(false)
+    }
+  }
+
+  const handleJiraSync = async () => {
+    setJiraSyncing(true)
+    setJiraSyncMessage('')
+    setJiraSyncError('')
+    try {
+      const authToken = localStorage.getItem('token')
+      const response = await fetch('/api/admin/sprints/sync', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type: 'all' }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to sync Jira')
+      }
+      const count = data?.result?.closedSprints?.closedSprintCount ?? data?.result?.closedSprintCount
+      const now = new Date().toISOString()
+      setJiraLastSyncAt(now)
+      localStorage.setItem('jiraLastSyncAt', now)
+      setJiraSyncMessage('Jira sync complete.')
+    } catch (err) {
+      setJiraSyncError(err instanceof Error ? err.message : 'Failed to sync Jira')
+    } finally {
+      setJiraSyncing(false)
+    }
+  }
+
 
   const integrations = [
     {
       name: 'Jira Integration',
       status: jiraTestOk === true
         ? 'ok'
-        : jiraSettings.hasToken && jiraSettings.baseUrl
+        : jiraSettings.hasToken
         ? 'configured'
         : 'warning',
       icon: Plug,
@@ -356,13 +606,25 @@ export default function SettingsPage() {
       name: 'Confluence Integration',
       status: confluenceTestOk === true
         ? 'ok'
-        : confluenceSettings.hasToken && confluenceSettings.baseUrl
+        : confluenceSettings.hasToken
         ? 'configured'
         : 'warning',
       icon: BookOpen,
     },
-    { name: 'GitHub Integration', status: 'warning', icon: GitBranch },
-    { name: 'Database Connection', status: 'ok', icon: Database },
+    {
+      name: 'GitHub Integration',
+      status: githubTestOk === true
+        ? 'ok'
+        : githubSettings.hasToken
+        ? 'configured'
+        : 'warning',
+      icon: GitBranch,
+    },
+    {
+      name: 'Database Connection',
+      status: dbStatus === 'ok' ? 'ok' : 'warning',
+      icon: Database,
+    },
   ]
 
   if (loading) {
@@ -407,37 +669,66 @@ export default function SettingsPage() {
                       <integration.icon className="w-5 h-5 text-slate-300" />
                       <div>
                         <p className="text-sm font-medium text-slate-200">{integration.name}</p>
+                        {integration.name === 'Database Connection' ? (
+                          <p className="text-xs text-slate-500">database.db</p>
+                        ) : null}
+                        {integration.name === 'Jira Integration' ? (
+                          <p className="text-xs text-slate-500">
+                            Last sync:{' '}
+                            {jiraLastSyncAt
+                              ? new Date(jiraLastSyncAt).toLocaleString()
+                              : 'Not synced yet'}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <div
-                        className={`w-2 h-2 rounded-full ${
-                          integration.status === 'ok'
-                            ? 'bg-green-400'
+                    <div className="flex items-center gap-3">
+                      {isAdmin && integration.name === 'Jira Integration' ? (
+                        <Button
+                          variant="outline"
+                          className="border-slate-700 text-slate-300"
+                          onClick={handleJiraSync}
+                          disabled={jiraSyncing}
+                        >
+                          {jiraSyncing ? 'Syncing Jira...' : 'Sync Jira'}
+                        </Button>
+                      ) : null}
+                      <div className="flex items-center gap-1">
+                        <div
+                          className={`w-2 h-2 rounded-full ${
+                            integration.status === 'ok'
+                              ? 'bg-green-400'
+                              : integration.status === 'configured'
+                              ? 'bg-blue-400'
+                              : 'bg-yellow-400 animate-pulse'
+                          }`}
+                        ></div>
+                        <span
+                          className={`text-xs font-medium ${
+                            integration.status === 'ok'
+                              ? 'text-green-400'
+                              : integration.status === 'configured'
+                              ? 'text-blue-400'
+                              : 'text-yellow-400'
+                          }`}
+                        >
+                          {integration.status === 'ok'
+                            ? 'Connected'
                             : integration.status === 'configured'
-                            ? 'bg-blue-400'
-                            : 'bg-yellow-400 animate-pulse'
-                        }`}
-                      ></div>
-                      <span
-                        className={`text-xs font-medium ${
-                          integration.status === 'ok'
-                            ? 'text-green-400'
-                            : integration.status === 'configured'
-                            ? 'text-blue-400'
-                            : 'text-yellow-400'
-                        }`}
-                      >
-                        {integration.status === 'ok'
-                          ? 'Connected'
-                          : integration.status === 'configured'
-                          ? 'Configured'
-                          : 'Pending'}
-                      </span>
+                            ? 'Configured'
+                            : 'Pending'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
+              {jiraSyncMessage ? (
+                <div className="mt-4 text-xs text-green-300">{jiraSyncMessage}</div>
+              ) : null}
+              {jiraSyncError ? (
+                <div className="mt-4 text-xs text-red-300">{jiraSyncError}</div>
+              ) : null}
 
               <div className="mt-6 pt-6 border-t border-slate-700/30">
                 <div className="flex items-center gap-2 text-slate-300 text-sm mb-4">
@@ -458,11 +749,23 @@ export default function SettingsPage() {
                     </Button>
                     {showJiraConfig && (
                       <form onSubmit={handleJiraConnect} className="space-y-3 mt-4">
+                        {!isAdmin ? (
+                          <Input
+                            placeholder="Jira Base URL (managed by admin)"
+                            value={jiraBaseUrlValue}
+                            disabled
+                            className="bg-slate-800/50 border-slate-700 disabled:opacity-60"
+                          />
+                        ) : (
+                          <div className="text-xs text-slate-400">
+                            Jira Base URL is managed in Admin Settings.
+                          </div>
+                        )}
                         <Input
-                          placeholder="Jira Base URL"
-                          value={jiraSettings.baseUrl}
+                          placeholder="Jira email"
+                          value={jiraSettings.user}
                           onChange={(e) =>
-                            setJiraSettings({ ...jiraSettings, baseUrl: e.target.value })
+                            setJiraSettings({ ...jiraSettings, user: e.target.value })
                           }
                           className="bg-slate-800/50 border-slate-700"
                         />
@@ -553,14 +856,18 @@ export default function SettingsPage() {
                     </Button>
                     {showConfluenceConfig && (
                       <form onSubmit={handleConfluenceConnect} className="space-y-3 mt-4">
-                        <Input
-                          placeholder="Confluence Base URL"
-                          value={confluenceSettings.baseUrl}
-                          onChange={(e) =>
-                            setConfluenceSettings({ ...confluenceSettings, baseUrl: e.target.value })
-                          }
-                          className="bg-slate-800/50 border-slate-700"
-                        />
+                        {!isAdmin ? (
+                          <Input
+                            placeholder="Confluence Base URL (managed by admin)"
+                            value={confluenceBaseUrlValue}
+                            disabled
+                            className="bg-slate-800/50 border-slate-700 disabled:opacity-60"
+                          />
+                        ) : (
+                          <div className="text-xs text-slate-400">
+                            Confluence Base URL is managed in Admin Settings.
+                          </div>
+                        )}
                         <Input
                           type="password"
                           placeholder={
@@ -605,6 +912,78 @@ export default function SettingsPage() {
                   </>
                 )}
               </div>
+
+              <div className="mt-6 pt-6 border-t border-slate-700/30">
+                <div className="flex items-center gap-2 text-slate-300 text-sm mb-4">
+                  <GitBranch className="w-4 h-4 text-blue-400" />
+                  Configure GitHub (per user)
+                </div>
+                {githubLoading ? (
+                  <div className="text-slate-400 text-sm">Loading GitHub settings...</div>
+                ) : (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full text-slate-300 hover:text-white hover:bg-slate-800/50 border-slate-700"
+                      onClick={() => setShowGithubConfig((prev) => !prev)}
+                    >
+                      {showGithubConfig ? 'Hide GitHub Settings' : 'Open GitHub Settings'}
+                    </Button>
+                    {showGithubConfig && (
+                      <form onSubmit={handleGithubConnect} className="space-y-3 mt-4">
+                        <Input
+                          placeholder="GitHub username"
+                          value={githubSettings.user}
+                          onChange={(e) =>
+                            setGithubSettings({ ...githubSettings, user: e.target.value })
+                          }
+                          className="bg-slate-800/50 border-slate-700"
+                        />
+                        <Input
+                          type="password"
+                          placeholder={
+                            githubSettings.hasToken ? 'Token stored (optional)' : 'GitHub token'
+                          }
+                          value={githubToken}
+                          onChange={(e) => setGithubToken(e.target.value)}
+                          className="bg-slate-800/50 border-slate-700"
+                        />
+                        <div className="text-xs text-slate-400">
+                          Auth: GitHub personal access token
+                        </div>
+
+                        {githubError && (
+                          <div className="flex items-center gap-2 text-xs text-red-300">
+                            <AlertCircle className="w-4 h-4" />
+                            <span>{githubError}</span>
+                          </div>
+                        )}
+                        {githubSuccess && (
+                          <div className="flex items-center gap-2 text-xs text-green-300">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>{githubSuccess}</span>
+                          </div>
+                        )}
+                        {githubTestResult && (
+                          <div className="flex items-center gap-2 text-xs text-blue-300">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>{githubTestResult}</span>
+                          </div>
+                        )}
+
+                        <Button
+                          type="submit"
+                          disabled={githubSaving || githubTesting}
+                          className="w-full btn-glow bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600"
+                        >
+                          {githubSaving || githubTesting ? 'Connecting...' : 'Connect'}
+                        </Button>
+                      </form>
+                    )}
+                  </>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -614,13 +993,59 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle className="text-2xl text-white">Admin Settings</CardTitle>
               <CardDescription className="text-slate-400">
-                Backend configuration reserved for admins.
+                Global configuration reserved for admins.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-slate-300">
-              <p>Use this area for global configuration (coming soon).</p>
-              <Button variant="outline" className="border-slate-700 text-slate-300">
-                Save Settings
+              <div className="space-y-3">
+                <Input
+                  placeholder="Jira Base URL"
+                  value={adminJiraBaseUrl}
+                  onChange={(e) => setAdminJiraBaseUrl(e.target.value)}
+                  className="bg-slate-800/50 border-slate-700"
+                />
+                <Input
+                  placeholder="Confluence Base URL"
+                  value={adminConfluenceBaseUrl}
+                  onChange={(e) => setAdminConfluenceBaseUrl(e.target.value)}
+                  className="bg-slate-800/50 border-slate-700"
+                />
+                <div>
+                  <div className="text-xs text-slate-400 mb-2">
+                    Nr Sprints to Sync (metrics will be based on this)
+                  </div>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50}
+                    placeholder="10"
+                    value={adminSprintsToSync}
+                    onChange={(e) => setAdminSprintsToSync(e.target.value)}
+                    className="bg-slate-800/50 border-slate-700"
+                  />
+                </div>
+              </div>
+
+              {adminError && (
+                <div className="flex items-center gap-2 text-xs text-red-300">
+                  <AlertCircle className="w-4 h-4" />
+                  <span>{adminError}</span>
+                </div>
+              )}
+              {adminSuccess && (
+                <div className="flex items-center gap-2 text-xs text-green-300">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{adminSuccess}</span>
+                </div>
+              )}
+
+              <Button
+                variant="outline"
+                className="border-slate-700 text-slate-300"
+                onClick={handleAdminSave}
+                disabled={adminSaving}
+              >
+                {adminSaving ? 'Saving...' : 'Save Settings'}
               </Button>
             </CardContent>
           </Card>

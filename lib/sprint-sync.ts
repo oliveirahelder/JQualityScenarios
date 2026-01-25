@@ -14,7 +14,56 @@ import type { JiraIssue, JiraSprintEvent } from '@/lib/jira-sprints'
 import type { JiraCredentials } from '@/lib/jira-config'
 import { ensureSprintSnapshot } from '@/lib/sprint-snapshot'
 
-const CLOSED_CUTOFF_DATE = new Date(Date.UTC(2025, 11, 1))
+const CLOSED_CUTOFF_DATE = new Date(Date.UTC(2025, 0, 1))
+const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
+const MAX_SPRINTS_PER_TEAM_LIMIT = 50
+
+function getTeamKey(name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return 'TEAM'
+  const match = trimmed.match(/^[A-Za-z0-9]+/)
+  return match ? match[0].toUpperCase() : trimmed.toUpperCase()
+}
+
+function limitClosedSprintsByTeam(
+  sprints: JiraSprintEvent[],
+  limit: number
+): JiraSprintEvent[] {
+  const sorted = [...sprints].sort(
+    (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
+  )
+  const grouped = new Map<string, JiraSprintEvent[]>()
+
+  for (const sprint of sorted) {
+    const key = getTeamKey(sprint.name)
+    const list = grouped.get(key) || []
+    if (list.length < limit) {
+      list.push(sprint)
+      grouped.set(key, list)
+    }
+  }
+
+  return Array.from(grouped.values()).flat()
+}
+
+function parseSprintHistory(value?: string | null) {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+async function getSprintsPerTeamLimit() {
+  const settings = await prisma.adminSettings.findFirst()
+  const value = settings?.sprintsToSync
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.min(Math.max(Math.floor(value), 1), MAX_SPRINTS_PER_TEAM_LIMIT)
+  }
+  return DEFAULT_SPRINTS_PER_TEAM_LIMIT
+}
 
 type JiraSprintReportIssue = {
   estimateStatistic?: { statFieldValue?: { value?: number | string | null } }
@@ -98,7 +147,7 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
           )
           const existingTicket = await prisma.ticket.findUnique({
             where: { jiraId: issueNormalized.jiraId },
-            select: { id: true },
+            select: { id: true, sprintHistory: true, jiraClosedAt: true, jiraCreatedAt: true },
           })
           const prCount = existingTicket
             ? await prisma.devInsight.count({
@@ -109,31 +158,50 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
               })
             : 0
 
+          const history = parseSprintHistory(existingTicket?.sprintHistory)
+          if (!history.includes(sprint.id)) {
+            history.push(sprint.id)
+          }
+          const carryoverCount = Math.max(0, history.length - 1)
+          const jiraCreatedAt = issueNormalized.createdAt ?? existingTicket?.jiraCreatedAt ?? null
+          const jiraClosedAt = closedAt ?? existingTicket?.jiraClosedAt ?? null
+
           await prisma.ticket.upsert({
             where: { jiraId: issueNormalized.jiraId },
             update: {
+              sprintId: sprint.id,
               summary: issueNormalized.summary,
               description: issueNormalized.description,
               status: issueNormalized.status,
               assignee: issueNormalized.assignee,
               priority: issueNormalized.priority,
+              issueType: issueNormalized.issueType || null,
               storyPoints: storyPoints ?? null,
               qaBounceBackCount: ticketBounceBacks,
               prCount,
               grossTime: Math.max(0, grossTime),
+              jiraCreatedAt,
+              jiraClosedAt,
+              sprintHistory: JSON.stringify(history),
+              carryoverCount,
             },
             create: {
               sprintId: sprint.id,
               jiraId: issueNormalized.jiraId,
               summary: issueNormalized.summary,
               description: issueNormalized.description,
-              status: 'TODO',
+              status: issueNormalized.status,
               assignee: issueNormalized.assignee,
               priority: issueNormalized.priority,
+              issueType: issueNormalized.issueType || null,
               storyPoints: storyPoints ?? null,
               qaBounceBackCount: ticketBounceBacks,
               prCount,
               grossTime: Math.max(0, grossTime),
+              jiraCreatedAt,
+              jiraClosedAt,
+              sprintHistory: JSON.stringify(history),
+              carryoverCount,
             },
           })
         }
@@ -168,12 +236,14 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
 
 function isClosedStatus(status: string) {
   const value = (status || '').toLowerCase()
-  return value.includes('closed') || value.includes('done') || value.includes('resolved')
+  if (value.includes('canceled') || value.includes('cancelled')) return false
+  return value.includes('closed') || value.includes('done')
 }
 
 function isStrictClosedStatus(status: string) {
   const value = (status || '').toLowerCase()
-  return value.includes('closed')
+  if (value.includes('canceled') || value.includes('cancelled')) return false
+  return value.includes('closed') || value.includes('done')
 }
 
 /**
@@ -185,9 +255,21 @@ export async function syncRecentClosedSprints(credentials?: JiraCredentials) {
     console.log('[Sprint Sync] Starting recently closed sprints sync...')
 
     const closedSprints = await getRecentClosedSprints(credentials)
+    const sprintsPerTeamLimit = await getSprintsPerTeamLimit()
     const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
+    const limitedClosedSprints = limitClosedSprintsByTeam(
+      closedSprints
+        .filter((sprint) => {
+          const endDate = getSprintEndDate(sprint)
+          return endDate && endDate >= CLOSED_CUTOFF_DATE
+        })
+        .sort(
+          (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
+        ),
+      sprintsPerTeamLimit
+    )
 
-    for (const jiraSprint of closedSprints) {
+    for (const jiraSprint of limitedClosedSprints) {
       const endDate = getSprintEndDate(jiraSprint)
       if (!endDate || endDate < CLOSED_CUTOFF_DATE) {
         continue
@@ -218,7 +300,7 @@ export async function syncRecentClosedSprints(credentials?: JiraCredentials) {
     }
 
     console.log('[Sprint Sync] Recently closed sprints sync completed')
-    return { success: true, closedSprintCount: closedSprints.length }
+    return { success: true, closedSprintCount: limitedClosedSprints.length }
   } catch (error) {
     console.error('[Sprint Sync] Error syncing closed sprints:', error)
     throw error
@@ -234,21 +316,26 @@ export async function syncAllClosedSprints(credentials?: JiraCredentials) {
     console.log('[Sprint Sync] Starting all closed sprints sync...')
 
     const closedSprints = await getAllClosedSprints(credentials)
+    const sprintsPerTeamLimit = await getSprintsPerTeamLimit()
     const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
-    const limitedClosedSprints = closedSprints
-      .filter((sprint) => {
-        const endDate = getSprintEndDate(sprint)
-        return endDate && endDate >= CLOSED_CUTOFF_DATE
-      })
-      .sort((a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime())
-      .slice(0, 10)
+    const limitedClosedSprints = limitClosedSprintsByTeam(
+      closedSprints
+        .filter((sprint) => {
+          const endDate = getSprintEndDate(sprint)
+          return endDate && endDate >= CLOSED_CUTOFF_DATE
+        })
+        .sort(
+          (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
+        ),
+      sprintsPerTeamLimit
+    )
     const keepJiraIds = new Set(limitedClosedSprints.map((sprint) => sprint.id.toString()))
 
     await prisma.sprint.deleteMany({
       where: {
         status: { in: ['COMPLETED', 'CLOSED'] },
         jiraId: { notIn: Array.from(keepJiraIds) },
-        endDate: { lt: CLOSED_CUTOFF_DATE },
+        endDate: { gte: CLOSED_CUTOFF_DATE },
       },
     })
 
@@ -303,7 +390,7 @@ export async function syncAllSprints(credentials?: JiraCredentials) {
 
     const [activeSyncResult, closedSyncResult] = await Promise.all([
       syncActiveSprints(credentials),
-      syncRecentClosedSprints(credentials),
+      syncAllClosedSprints(credentials),
     ])
 
     console.log('[Sprint Sync] Full sync completed')
@@ -372,9 +459,10 @@ async function syncSprintIssuesLite(
         const status = (issue?.statusName || issue?.status || '').toLowerCase()
         if (
           status.includes('ready for release') ||
-          status.includes('waiting for approval') ||
           status.includes('awaiting approval') ||
-          status.includes('in release')
+          status.includes('in release') ||
+          status.includes('done') ||
+          status.includes('closed')
         ) {
           qaDoneTickets += 1
         }
@@ -429,7 +517,13 @@ async function syncSprintIssuesLite(
     )
     const existingTicket = await prisma.ticket.findUnique({
       where: { jiraId: issueNormalized.jiraId },
-      select: { id: true, qaBounceBackCount: true },
+      select: {
+        id: true,
+        qaBounceBackCount: true,
+        sprintHistory: true,
+        jiraClosedAt: true,
+        jiraCreatedAt: true,
+      },
     })
     const prCount = existingTicket
       ? await prisma.devInsight.count({
@@ -440,18 +534,32 @@ async function syncSprintIssuesLite(
         })
       : 0
 
+    const history = parseSprintHistory(existingTicket?.sprintHistory)
+    if (!history.includes(sprintId)) {
+      history.push(sprintId)
+    }
+    const carryoverCount = Math.max(0, history.length - 1)
+    const jiraCreatedAt = issueNormalized.createdAt ?? existingTicket?.jiraCreatedAt ?? null
+    const jiraClosedAt = existingTicket?.jiraClosedAt ?? null
+
     await prisma.ticket.upsert({
       where: { jiraId: issueNormalized.jiraId },
       update: {
+        sprintId,
         summary: issueNormalized.summary,
         description: issueNormalized.description,
         status: issueNormalized.status,
         assignee: issueNormalized.assignee,
         priority: issueNormalized.priority,
+        issueType: issueNormalized.issueType || null,
         storyPoints: storyPoints ?? null,
         qaBounceBackCount: existingTicket?.qaBounceBackCount ?? 0,
         prCount,
         grossTime: Math.max(0, grossTime),
+        jiraCreatedAt,
+        jiraClosedAt,
+        sprintHistory: JSON.stringify(history),
+        carryoverCount,
       },
       create: {
         sprintId,
@@ -461,10 +569,15 @@ async function syncSprintIssuesLite(
         status: issueNormalized.status,
         assignee: issueNormalized.assignee,
         priority: issueNormalized.priority,
+        issueType: issueNormalized.issueType || null,
         storyPoints: storyPoints ?? null,
         qaBounceBackCount: 0,
         prCount,
         grossTime: Math.max(0, grossTime),
+        jiraCreatedAt,
+        jiraClosedAt,
+        sprintHistory: JSON.stringify(history),
+        carryoverCount,
       },
     })
   }

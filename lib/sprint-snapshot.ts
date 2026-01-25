@@ -1,12 +1,13 @@
 import { prisma } from '@/lib/prisma'
 import type { JiraCredentials } from '@/lib/jira-config'
 
-const CLOSED_STATUSES = ['closed', 'done', 'resolved']
+const CLOSED_STATUSES = ['closed', 'done']
 const QA_DONE_STATUSES = [
   'ready for release',
-  'waiting for approval',
   'awaiting approval',
   'in release',
+  'done',
+  'closed',
 ]
 const DEV_STATUSES = ['in progress', 'in development', 'in refinement']
 
@@ -32,7 +33,9 @@ type SprintTicket = {
 }
 
 function isClosed(status: string | null | undefined) {
-  return CLOSED_STATUSES.some((value) => (status || '').toLowerCase().includes(value))
+  const value = (status || '').toLowerCase()
+  if (value.includes('canceled') || value.includes('cancelled')) return false
+  return CLOSED_STATUSES.some((entry) => value.includes(entry))
 }
 
 function isQaDone(status: string | null | undefined) {

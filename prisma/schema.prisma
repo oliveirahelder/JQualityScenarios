@@ -40,6 +40,10 @@ model User {
   confluenceDeployment String?
   confluenceConnectionStatus String?
   confluenceConnectionCheckedAt DateTime?
+  githubUser String?
+  githubApiToken String?
+  githubConnectionStatus String?
+  githubConnectionCheckedAt DateTime?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -48,6 +52,17 @@ model User {
   testScenarios TestScenario[]
 
   @@map("users")
+}
+
+model AdminSettings {
+  id               String   @id @default(cuid())
+  jiraBaseUrl      String?
+  confluenceBaseUrl String?
+  sprintsToSync    Int      @default(10)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("admin_settings")
 }
 
 // Sprint model - tracks Sprint creation and dates
@@ -109,9 +124,14 @@ model Ticket {
   status    String     @default("TODO")
   assignee  String?
   priority  String?
+  issueType String?
   storyPoints Float?
   qaBounceBackCount Int @default(0)
   prCount   Int       @default(0)
+  jiraCreatedAt DateTime?
+  jiraClosedAt DateTime?
+  sprintHistory String?
+  carryoverCount Int @default(0)
   
   grossTime Int? // Calculated from Sprint startDate in calendar days
   

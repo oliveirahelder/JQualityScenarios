@@ -22,8 +22,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
+    const adminSettings = await prisma.adminSettings.findFirst()
     return NextResponse.json({
-      baseUrl: user.jiraBaseUrl || '',
+      baseUrl:
+        adminSettings?.jiraBaseUrl || user.jiraBaseUrl || process.env.JIRA_BASE_URL || '',
       user: user.jiraUser || '',
       boardIds: user.jiraBoardIds || '',
       sprintFieldId: user.jiraSprintFieldId || '',
@@ -56,6 +58,7 @@ export async function PUT(req: NextRequest) {
     if (!payload) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
     }
+    const isAdmin = ['ADMIN', 'DEVOPS'].includes(payload.role)
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -78,15 +81,15 @@ export async function PUT(req: NextRequest) {
     } = await req.json()
 
     const normalizedBaseUrl =
-      typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : ''
-    const normalizedUser = typeof jiraUser === 'string' ? jiraUser.trim() : ''
-    const normalizedBoardIds = typeof boardIds === 'string' ? boardIds.trim() : ''
+      typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : undefined
+    const normalizedUser = typeof jiraUser === 'string' ? jiraUser.trim() : undefined
+    const normalizedBoardIds = typeof boardIds === 'string' ? boardIds.trim() : undefined
     const normalizedSprintFieldId =
-      typeof sprintFieldId === 'string' ? sprintFieldId.trim() : ''
+      typeof sprintFieldId === 'string' ? sprintFieldId.trim() : undefined
     const normalizedAuthType =
-      authType === 'bearer' || authType === 'basic' ? authType : 'bearer'
+      authType === 'bearer' || authType === 'basic' ? authType : undefined
     const normalizedDeployment =
-      deployment === 'datacenter' || deployment === 'cloud' ? deployment : 'datacenter'
+      deployment === 'datacenter' || deployment === 'cloud' ? deployment : undefined
 
     const normalizedBoardUrl = typeof boardUrl === 'string' ? boardUrl.trim() : ''
     const boardIdFromUrl = extractBoardIdFromUrl(normalizedBoardUrl)
@@ -105,25 +108,48 @@ export async function PUT(req: NextRequest) {
       jiraDeployment?: string | null
       jiraConnectionStatus?: string | null
       jiraConnectionCheckedAt?: Date | null
-    } = {
-      jiraBaseUrl: normalizedBaseUrl || null,
-      jiraUser: normalizedUser || null,
-      jiraBoardIds: mergedBoardIds || null,
-      jiraSprintFieldId: normalizedSprintFieldId || null,
-      jiraAuthType: normalizedAuthType,
-      jiraDeployment: normalizedDeployment,
-      jiraConnectionStatus: null,
-      jiraConnectionCheckedAt: null,
-    }
+    } = {}
 
+    if (typeof normalizedUser === 'string') {
+      updateData.jiraUser = normalizedUser || null
+    }
+    if (typeof mergedBoardIds === 'string') {
+      updateData.jiraBoardIds = mergedBoardIds || null
+    }
+    if (typeof normalizedSprintFieldId === 'string') {
+      updateData.jiraSprintFieldId = normalizedSprintFieldId || null
+    }
+    if (typeof normalizedAuthType === 'string') {
+      updateData.jiraAuthType = normalizedAuthType
+    }
+    if (typeof normalizedDeployment === 'string') {
+      updateData.jiraDeployment = normalizedDeployment
+    }
     if (typeof requestTimeout === 'number' && requestTimeout > 0) {
       updateData.jiraRequestTimeout = requestTimeout
-    } else {
-      updateData.jiraRequestTimeout = null
+    }
+
+    if (typeof normalizedBaseUrl === 'string' && isAdmin) {
+      const existing = await prisma.adminSettings.findFirst()
+      if (existing) {
+        await prisma.adminSettings.update({
+          where: { id: existing.id },
+          data: { jiraBaseUrl: normalizedBaseUrl || null },
+        })
+      } else {
+        await prisma.adminSettings.create({
+          data: { jiraBaseUrl: normalizedBaseUrl || null },
+        })
+      }
     }
 
     if (jiraToken) {
       updateData.jiraApiToken = jiraToken
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      updateData.jiraConnectionStatus = null
+      updateData.jiraConnectionCheckedAt = null
     }
 
     await prisma.user.update({
