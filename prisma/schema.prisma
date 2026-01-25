@@ -58,6 +58,7 @@ model AdminSettings {
   id               String   @id @default(cuid())
   jiraBaseUrl      String?
   confluenceBaseUrl String?
+  sprintsToSync    Int      @default(10)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -126,6 +127,10 @@ model Ticket {
   storyPoints Float?
   qaBounceBackCount Int @default(0)
   prCount   Int       @default(0)
+  jiraCreatedAt DateTime?
+  jiraClosedAt DateTime?
+  sprintHistory String?
+  carryoverCount Int @default(0)
   
   grossTime Int? // Calculated from Sprint startDate in calendar days
   

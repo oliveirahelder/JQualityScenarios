@@ -4,16 +4,17 @@ import { prisma } from '@/lib/prisma'
 import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
 import type { JiraCredentials } from '@/lib/jira-config'
 
-const CLOSED_STATUSES = ['closed', 'done', 'resolved']
+const CLOSED_STATUSES = ['closed', 'done']
 const QA_READY_STATUSES = [
   'ready for release',
-  'waiting for approval',
   'awaiting approval',
   'in release',
 ]
 const QA_ACTIVE_STATUSES = ['in qa']
 const DEV_STATUSES = ['in progress', 'in development', 'in refinement']
 const END_STATUSES = [...QA_READY_STATUSES, ...CLOSED_STATUSES]
+const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
+const MAX_SPRINTS_PER_TEAM_LIMIT = 50
 
 const METRICS_CACHE_TTL_MS = 30_000
 const metricsCache = new Map<string, { timestamp: number; payload: unknown }>()
@@ -65,8 +66,31 @@ function getTeamKey(name: string) {
   return match ? match[0].toUpperCase() : trimmed.toUpperCase()
 }
 
+function clampSprintsToSync(value?: number | null) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.min(Math.max(Math.floor(value), 1), MAX_SPRINTS_PER_TEAM_LIMIT)
+  }
+  return DEFAULT_SPRINTS_PER_TEAM_LIMIT
+}
+
+function limitByTeam<T extends { name: string; endDate: Date }>(items: T[], limit: number) {
+  const sorted = [...items].sort((a, b) => b.endDate.getTime() - a.endDate.getTime())
+  const grouped = new Map<string, T[]>()
+  for (const item of sorted) {
+    const key = getTeamKey(item.name)
+    const list = grouped.get(key) || []
+    if (list.length < limit) {
+      list.push(item)
+      grouped.set(key, list)
+    }
+  }
+  return Array.from(grouped.values()).flat().sort((a, b) => b.endDate.getTime() - a.endDate.getTime())
+}
+
 function isStrictClosed(status?: string | null) {
-  return (status || '').toLowerCase().includes('closed')
+  const value = (status || '').toLowerCase()
+  if (value.includes('canceled') || value.includes('cancelled')) return false
+  return value.includes('closed') || value.includes('done')
 }
 
 function isBusinessDay(date: Date) {
@@ -183,7 +207,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    const jiraCredentials = buildJiraCredentialsFromUser(user)
+    const adminSettings = await prisma.adminSettings.findFirst()
+    const sprintsToSync = clampSprintsToSync(adminSettings?.sprintsToSync)
+    const jiraCredentials = buildJiraCredentialsFromUser(
+      user,
+      adminSettings?.jiraBaseUrl || null
+    )
     if (!jiraCredentials) {
       return NextResponse.json({ error: 'Jira integration not configured' }, { status: 400 })
     }
@@ -463,11 +492,12 @@ export async function GET(request: NextRequest) {
       }))
       .sort((a, b) => b.ticketCount - a.ticketCount || a.name.localeCompare(b.name))
 
-    const lastSprintSnapshots = await prisma.sprintSnapshot.findMany({
+    const lastSprintSnapshotsRaw = await prisma.sprintSnapshot.findMany({
       where: { status: { in: ['COMPLETED', 'CLOSED'] } },
       orderBy: { endDate: 'desc' },
-      take: 10,
+      take: 200,
     })
+    const lastSprintSnapshots = limitByTeam(lastSprintSnapshotsRaw, sprintsToSync)
 
     const storyPointAverages = new Map<string, { total: number; closed: number; sprintCount: number }>()
     for (const snapshot of lastSprintSnapshots) {
@@ -575,12 +605,13 @@ export async function GET(request: NextRequest) {
         : 0,
       sprintCount: entry.sprintCount,
     }))
-    const previousSprints = (await prisma.sprint.findMany({
+    const previousSprintsRaw = (await prisma.sprint.findMany({
       where: { status: { in: ['CLOSED', 'COMPLETED'] } },
       include: { tickets: true },
       orderBy: { endDate: 'desc' },
-      take: 50,
+      take: 200,
     })) as SprintWithTickets[]
+    const previousSprints = limitByTeam(previousSprintsRaw, sprintsToSync) as SprintWithTickets[]
     const previousSprint = previousSprints[0] || null
     const primaryActiveSprint = activeSprints[0] || null
     const elapsedDays =

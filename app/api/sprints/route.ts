@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
       where: { id: payload.userId },
       select: { jiraBaseUrl: true, jiraBoardIds: true },
     })
+    const adminSettings = await prisma.adminSettings.findFirst()
 
     const jiraBoardId = user?.jiraBoardIds
       ? user.jiraBoardIds
@@ -78,7 +79,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       sprints: normalizedSprints,
-      jiraBaseUrl: user?.jiraBaseUrl || '',
+      jiraBaseUrl: adminSettings?.jiraBaseUrl || user?.jiraBaseUrl || '',
       jiraBoardId: jiraBoardId ?? null,
     })
   } catch (error) {

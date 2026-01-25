@@ -25,7 +25,11 @@ export async function POST(req: NextRequest) {
     }
     userId = user.id
 
-    const credentials = buildConfluenceCredentialsFromUser(user)
+    const adminSettings = await prisma.adminSettings.findFirst()
+    const credentials = buildConfluenceCredentialsFromUser(
+      user,
+      adminSettings?.confluenceBaseUrl || null
+    )
     if (!credentials) {
       return NextResponse.json(
         { error: 'Confluence integration not configured' },

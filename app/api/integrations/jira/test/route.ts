@@ -25,7 +25,11 @@ export async function POST(req: NextRequest) {
     }
     userId = user.id
 
-    const credentials = buildJiraCredentialsFromUser(user)
+    const adminSettings = await prisma.adminSettings.findFirst()
+    const credentials = buildJiraCredentialsFromUser(
+      user,
+      adminSettings?.jiraBaseUrl || null
+    )
     if (!credentials) {
       return NextResponse.json(
         { error: 'Jira integration not configured' },

@@ -7,18 +7,22 @@ export interface ConfluenceCredentials {
   requestTimeout?: number
 }
 
-export function buildConfluenceCredentialsFromUser(user: {
+export function buildConfluenceCredentialsFromUser(
+  user: {
   confluenceBaseUrl?: string | null
   confluenceUser?: string | null
   confluenceApiToken?: string | null
   confluenceAuthType?: string | null
   confluenceDeployment?: string | null
   confluenceRequestTimeout?: number | null
-}): ConfluenceCredentials | null {
+  },
+  baseUrlOverride?: string | null
+): ConfluenceCredentials | null {
   const authType = user.confluenceAuthType === 'basic' ? 'basic' : 'bearer'
   const deployment = user.confluenceDeployment === 'cloud' ? 'cloud' : 'datacenter'
 
-  if (!user.confluenceBaseUrl || !user.confluenceApiToken) {
+  const baseUrl = baseUrlOverride || user.confluenceBaseUrl
+  if (!baseUrl || !user.confluenceApiToken) {
     return null
   }
 
@@ -27,7 +31,7 @@ export function buildConfluenceCredentialsFromUser(user: {
   }
 
   return {
-    baseUrl: user.confluenceBaseUrl,
+    baseUrl,
     user: user.confluenceUser || undefined,
     token: user.confluenceApiToken || '',
     authType,

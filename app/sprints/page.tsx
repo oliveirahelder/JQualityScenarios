@@ -17,6 +17,9 @@ export default function SprintsPage() {
     storyPoints?: number | null
     qaBounceBackCount?: number | null
     prCount?: number | null
+    jiraCreatedAt?: string | Date | null
+    jiraClosedAt?: string | Date | null
+    carryoverCount?: number | null
     devInsights?: Array<{
       id: string
       prUrl?: string | null
@@ -83,8 +86,7 @@ export default function SprintsPage() {
     const total = tickets?.length || 0
     if (!total) return { closed: 0, total: 0 }
     const closed = (tickets || []).filter((ticket) => {
-      const status = (ticket?.status || '').toLowerCase()
-      return status.includes('closed')
+      return isClosedStatus(ticket?.status || undefined)
     }).length
     return { closed, total }
   }
@@ -198,10 +200,10 @@ export default function SprintsPage() {
 
   const isClosedStatus = (status: string | undefined) => {
     const value = (status || '').toLowerCase()
+    if (value.includes('canceled') || value.includes('cancelled')) return false
     return (
       value.includes('closed') ||
-      value.includes('done') ||
-      value.includes('resolved')
+      value.includes('done')
     )
   }
 
@@ -210,7 +212,6 @@ export default function SprintsPage() {
     return (
       value.includes('ready for release') ||
       value.includes('awaiting approval') ||
-      value.includes('waiting for approval') ||
       value.includes('in release')
     )
   }
@@ -235,6 +236,38 @@ export default function SprintsPage() {
     if (!jiraBaseUrl || !jiraBoardId || !sprintId) return ''
     const base = jiraBaseUrl.replace(/\/$/, '')
     return `${base}/secure/RapidBoard.jspa?rapidView=${jiraBoardId}&view=reporting&chart=sprintRetrospective&sprint=${sprintId}`
+  }
+
+  const businessHoursBetween = (start: Date, end: Date) => {
+    if (end <= start) return 0
+    const startDate = new Date(start)
+    const endDate = new Date(end)
+    startDate.setHours(0, 0, 0, 0)
+    endDate.setHours(0, 0, 0, 0)
+    let hours = 0
+    const cursor = new Date(startDate)
+    while (cursor <= endDate) {
+      const day = cursor.getDay()
+      if (day >= 1 && day <= 5) {
+        hours += 8
+      }
+      cursor.setDate(cursor.getDate() + 1)
+    }
+    return hours
+  }
+
+  const getTicketAgeHours = (ticket: SprintTicket) => {
+    if (!ticket.jiraCreatedAt) return null
+    const createdAt = new Date(ticket.jiraCreatedAt)
+    if (Number.isNaN(createdAt.getTime())) return null
+    const endAt = ticket.jiraClosedAt ? new Date(ticket.jiraClosedAt) : new Date()
+    if (Number.isNaN(endAt.getTime())) return null
+    return businessHoursBetween(createdAt, endAt)
+  }
+
+  const formatHours = (hours: number | null) => {
+    if (hours == null) return '--'
+    return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`
   }
 
   const sortTickets = (tickets: SprintTicket[], sortKey: 'status' | 'story' | 'bounce') => {
@@ -377,6 +410,24 @@ export default function SprintsPage() {
       ...prev,
       [sprintId]: !prev[sprintId],
     }))
+  }
+
+  const handleClearSprintFilters = (sprintId: string) => {
+    setFilterBySprint((prev) => {
+      const next = { ...prev }
+      delete next[sprintId]
+      return next
+    })
+    setSortBySprint((prev) => {
+      const next = { ...prev }
+      delete next[sprintId]
+      return next
+    })
+    setAssigneeFilterBySprint((prev) => {
+      const next = { ...prev }
+      delete next[sprintId]
+      return next
+    })
   }
 
   return (
@@ -591,9 +642,9 @@ export default function SprintsPage() {
                                 : (sprint.tickets || []).reduce((sum: number, ticket: SprintTicket) => {
                                     const status = (ticket.status || '').toLowerCase()
                                     const isClosed =
-                                      status.includes('closed') ||
-                                      status.includes('done') ||
-                                      status.includes('resolved')
+                                      (status.includes('closed') || status.includes('done')) &&
+                                      !status.includes('canceled') &&
+                                      !status.includes('cancelled')
                                     return sum + (isClosed ? ticket.storyPoints || 0 : 0)
                                   }, 0)
                             const remainingStoryPoints = Math.max(
@@ -635,7 +686,8 @@ export default function SprintsPage() {
                       {isExpanded ? (
                         <>
                           <div className="mt-4">
-                            <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                               <select
                                 value={filterBySprint[sprint.id] || 'all'}
                                 onChange={(event) =>
@@ -674,6 +726,19 @@ export default function SprintsPage() {
                                 <option value="story">Story Points</option>
                                 <option value="bounce">Bounce Back</option>
                               </select>
+                              </div>
+                              {(filterBySprint[sprint.id] && filterBySprint[sprint.id] !== 'all') ||
+                              sortBySprint[sprint.id] ||
+                              assigneeFilterBySprint[sprint.id] ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  onClick={() => handleClearSprintFilters(sprint.id)}
+                                  className="text-slate-400 hover:text-white hover:bg-slate-800/50 text-xs"
+                                >
+                                  Clear filters
+                                </Button>
+                              ) : null}
                               {assigneeFilterBySprint[sprint.id] ? (
                                 <div className="flex items-center gap-2 text-xs text-slate-300">
                                   <span className="rounded-md bg-slate-900/60 px-2 py-1">
@@ -737,6 +802,7 @@ export default function SprintsPage() {
                                         <th className="py-2 pr-4">Impact</th>
                                         <th className="py-2 pr-4">Scenarios</th>
                                         <th className="py-2 pr-4">Bounce</th>
+                                        <th className="py-2 pr-4">Flags</th>
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/60 text-slate-200">
@@ -804,8 +870,44 @@ export default function SprintsPage() {
                                               )
                                             })()}
                                           </td>
-                                          <td className="py-2 text-slate-300">
+                                          <td className="py-2 pr-4 text-slate-300">
                                             {ticket.qaBounceBackCount ?? 0}
+                                          </td>
+                                          <td className="py-2 pr-4">
+                                            {(() => {
+                                              const carryover = ticket.carryoverCount || 0
+                                              const hours = getTicketAgeHours(ticket)
+                                              const isClosed = isClosedStatus(ticket.status || undefined)
+                                              const label = isClosed ? 'Closed time' : 'Open time'
+                                              const tooltipParts = []
+                                              if (carryover > 0) {
+                                                tooltipParts.push(`Carryover: ${carryover}`)
+                                              }
+                                              if (hours != null) {
+                                                tooltipParts.push(`${label}: ${formatHours(hours)}`)
+                                              }
+                                              const tooltip = tooltipParts.join(' | ')
+                                              if (carryover === 0 && hours == null) {
+                                                return <span className="text-slate-500 text-xs">--</span>
+                                              }
+                                              return (
+                                                <span
+                                                  className="inline-flex items-center gap-1 text-xs text-slate-200"
+                                                  title={tooltip}
+                                                >
+                                                  {carryover > 0 ? (
+                                                    <span className="rounded-md bg-amber-500/20 text-amber-200 px-2 py-0.5">
+                                                      CO {carryover}
+                                                    </span>
+                                                  ) : null}
+                                                  {hours != null ? (
+                                                    <span className="rounded-md bg-slate-700/50 text-slate-200 px-2 py-0.5">
+                                                      {formatHours(hours)}
+                                                    </span>
+                                                  ) : null}
+                                                </span>
+                                              )
+                                            })()}
                                           </td>
                                         </tr>
                                       ))}

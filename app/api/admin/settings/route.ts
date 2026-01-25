@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       jiraBaseUrl: settings?.jiraBaseUrl || '',
       confluenceBaseUrl: settings?.confluenceBaseUrl || '',
+      sprintsToSync: settings?.sprintsToSync ?? 10,
     })
   } catch (error) {
     console.error('[Admin Settings] Error fetching settings:', error)
@@ -41,12 +42,16 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const { jiraBaseUrl, confluenceBaseUrl } = await req.json()
+    const { jiraBaseUrl, confluenceBaseUrl, sprintsToSync } = await req.json()
     const normalizedJira =
       typeof jiraBaseUrl === 'string' ? jiraBaseUrl.trim().replace(/\/+$/, '') : undefined
     const normalizedConfluence =
       typeof confluenceBaseUrl === 'string'
         ? confluenceBaseUrl.trim().replace(/\/+$/, '')
+        : undefined
+    const normalizedSprintsToSync =
+      typeof sprintsToSync === 'number' && Number.isFinite(sprintsToSync)
+        ? Math.min(Math.max(Math.floor(sprintsToSync), 1), 50)
         : undefined
 
     const existing = await prisma.adminSettings.findFirst()
@@ -56,6 +61,7 @@ export async function PUT(req: NextRequest) {
         data: {
           jiraBaseUrl: normalizedJira || null,
           confluenceBaseUrl: normalizedConfluence || null,
+          sprintsToSync: normalizedSprintsToSync ?? existing.sprintsToSync,
         },
       })
     } else {
@@ -63,6 +69,7 @@ export async function PUT(req: NextRequest) {
         data: {
           jiraBaseUrl: normalizedJira || null,
           confluenceBaseUrl: normalizedConfluence || null,
+          sprintsToSync: normalizedSprintsToSync ?? 10,
         },
       })
     }

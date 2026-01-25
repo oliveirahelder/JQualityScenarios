@@ -86,9 +86,16 @@ export default function SettingsPage() {
   const [dbStatus, setDbStatus] = useState<'ok' | 'error' | 'checking'>('checking')
   const [adminJiraBaseUrl, setAdminJiraBaseUrl] = useState('')
   const [adminConfluenceBaseUrl, setAdminConfluenceBaseUrl] = useState('')
+  const [adminSprintsToSync, setAdminSprintsToSync] = useState('10')
   const [adminSaving, setAdminSaving] = useState(false)
   const [adminError, setAdminError] = useState('')
   const [adminSuccess, setAdminSuccess] = useState('')
+  const [jiraSyncing, setJiraSyncing] = useState(false)
+  const [jiraSyncMessage, setJiraSyncMessage] = useState('')
+  const [jiraSyncError, setJiraSyncError] = useState('')
+  const [jiraLastSyncAt, setJiraLastSyncAt] = useState<string | null>(null)
+  const jiraBaseUrlValue = jiraSettings.baseUrl || adminJiraBaseUrl
+  const confluenceBaseUrlValue = confluenceSettings.baseUrl || adminConfluenceBaseUrl
 
   useEffect(() => {
     const storedUser = localStorage.getItem('user')
@@ -101,6 +108,11 @@ export default function SettingsPage() {
       }
     }
     setLoading(false)
+  }, [])
+
+  useEffect(() => {
+    const stored = localStorage.getItem('jiraLastSyncAt')
+    if (stored) setJiraLastSyncAt(stored)
   }, [])
 
   useEffect(() => {
@@ -171,8 +183,21 @@ export default function SettingsPage() {
           throw new Error(data.error || 'Failed to load admin settings')
         }
         const adminData = await adminResponse.json()
-        setAdminJiraBaseUrl(adminData?.jiraBaseUrl || '')
-        setAdminConfluenceBaseUrl(adminData?.confluenceBaseUrl || '')
+        const nextAdminJiraBaseUrl = adminData?.jiraBaseUrl || ''
+        const nextAdminConfluenceBaseUrl = adminData?.confluenceBaseUrl || ''
+        const nextAdminSprintsToSync =
+          typeof adminData?.sprintsToSync === 'number'
+            ? adminData.sprintsToSync.toString()
+            : '10'
+        setAdminJiraBaseUrl(nextAdminJiraBaseUrl)
+        setAdminConfluenceBaseUrl(nextAdminConfluenceBaseUrl)
+        setAdminSprintsToSync(nextAdminSprintsToSync)
+        if (!jiraData?.baseUrl && nextAdminJiraBaseUrl) {
+          setJiraSettings((prev) => ({ ...prev, baseUrl: nextAdminJiraBaseUrl }))
+        }
+        if (!confluenceData?.baseUrl && nextAdminConfluenceBaseUrl) {
+          setConfluenceSettings((prev) => ({ ...prev, baseUrl: nextAdminConfluenceBaseUrl }))
+        }
 
         const githubData = await githubResponse.json()
         setGithubSettings(githubData)
@@ -237,7 +262,7 @@ export default function SettingsPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          baseUrl: isAdmin ? jiraSettings.baseUrl : undefined,
+          baseUrl: undefined,
           user: jiraSettings.user,
           boardIds: jiraSettings.boardIds,
           boardUrl: jiraBoardUrl,
@@ -335,7 +360,7 @@ export default function SettingsPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          baseUrl: isAdmin ? confluenceSettings.baseUrl : undefined,
+          baseUrl: undefined,
           token: confluenceToken.trim() || undefined,
         }),
       })
@@ -503,6 +528,10 @@ export default function SettingsPage() {
     setAdminSuccess('')
 
     try {
+      const parsedSprintsToSync = Number.parseInt(adminSprintsToSync, 10)
+      const normalizedSprintsToSync = Number.isFinite(parsedSprintsToSync)
+        ? parsedSprintsToSync
+        : undefined
       const authToken = localStorage.getItem('token')
       const response = await fetch('/api/admin/settings', {
         method: 'PUT',
@@ -513,6 +542,7 @@ export default function SettingsPage() {
         body: JSON.stringify({
           jiraBaseUrl: adminJiraBaseUrl,
           confluenceBaseUrl: adminConfluenceBaseUrl,
+          sprintsToSync: normalizedSprintsToSync,
         }),
       })
 
@@ -521,11 +551,43 @@ export default function SettingsPage() {
         throw new Error(data.error || 'Failed to save admin settings')
       }
 
+      setJiraSettings((prev) => ({ ...prev, baseUrl: adminJiraBaseUrl }))
+      setConfluenceSettings((prev) => ({ ...prev, baseUrl: adminConfluenceBaseUrl }))
       setAdminSuccess('Admin settings updated.')
     } catch (err) {
       setAdminError(err instanceof Error ? err.message : 'Failed to save admin settings')
     } finally {
       setAdminSaving(false)
+    }
+  }
+
+  const handleJiraSync = async () => {
+    setJiraSyncing(true)
+    setJiraSyncMessage('')
+    setJiraSyncError('')
+    try {
+      const authToken = localStorage.getItem('token')
+      const response = await fetch('/api/admin/sprints/sync', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type: 'all' }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to sync Jira')
+      }
+      const count = data?.result?.closedSprints?.closedSprintCount ?? data?.result?.closedSprintCount
+      const now = new Date().toISOString()
+      setJiraLastSyncAt(now)
+      localStorage.setItem('jiraLastSyncAt', now)
+      setJiraSyncMessage('Jira sync complete.')
+    } catch (err) {
+      setJiraSyncError(err instanceof Error ? err.message : 'Failed to sync Jira')
+    } finally {
+      setJiraSyncing(false)
     }
   }
 
@@ -607,37 +669,66 @@ export default function SettingsPage() {
                       <integration.icon className="w-5 h-5 text-slate-300" />
                       <div>
                         <p className="text-sm font-medium text-slate-200">{integration.name}</p>
+                        {integration.name === 'Database Connection' ? (
+                          <p className="text-xs text-slate-500">database.db</p>
+                        ) : null}
+                        {integration.name === 'Jira Integration' ? (
+                          <p className="text-xs text-slate-500">
+                            Last sync:{' '}
+                            {jiraLastSyncAt
+                              ? new Date(jiraLastSyncAt).toLocaleString()
+                              : 'Not synced yet'}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <div
-                        className={`w-2 h-2 rounded-full ${
-                          integration.status === 'ok'
-                            ? 'bg-green-400'
+                    <div className="flex items-center gap-3">
+                      {isAdmin && integration.name === 'Jira Integration' ? (
+                        <Button
+                          variant="outline"
+                          className="border-slate-700 text-slate-300"
+                          onClick={handleJiraSync}
+                          disabled={jiraSyncing}
+                        >
+                          {jiraSyncing ? 'Syncing Jira...' : 'Sync Jira'}
+                        </Button>
+                      ) : null}
+                      <div className="flex items-center gap-1">
+                        <div
+                          className={`w-2 h-2 rounded-full ${
+                            integration.status === 'ok'
+                              ? 'bg-green-400'
+                              : integration.status === 'configured'
+                              ? 'bg-blue-400'
+                              : 'bg-yellow-400 animate-pulse'
+                          }`}
+                        ></div>
+                        <span
+                          className={`text-xs font-medium ${
+                            integration.status === 'ok'
+                              ? 'text-green-400'
+                              : integration.status === 'configured'
+                              ? 'text-blue-400'
+                              : 'text-yellow-400'
+                          }`}
+                        >
+                          {integration.status === 'ok'
+                            ? 'Connected'
                             : integration.status === 'configured'
-                            ? 'bg-blue-400'
-                            : 'bg-yellow-400 animate-pulse'
-                        }`}
-                      ></div>
-                      <span
-                        className={`text-xs font-medium ${
-                          integration.status === 'ok'
-                            ? 'text-green-400'
-                            : integration.status === 'configured'
-                            ? 'text-blue-400'
-                            : 'text-yellow-400'
-                        }`}
-                      >
-                        {integration.status === 'ok'
-                          ? 'Connected'
-                          : integration.status === 'configured'
-                          ? 'Configured'
-                          : 'Pending'}
-                      </span>
+                            ? 'Configured'
+                            : 'Pending'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
+              {jiraSyncMessage ? (
+                <div className="mt-4 text-xs text-green-300">{jiraSyncMessage}</div>
+              ) : null}
+              {jiraSyncError ? (
+                <div className="mt-4 text-xs text-red-300">{jiraSyncError}</div>
+              ) : null}
 
               <div className="mt-6 pt-6 border-t border-slate-700/30">
                 <div className="flex items-center gap-2 text-slate-300 text-sm mb-4">
@@ -658,17 +749,18 @@ export default function SettingsPage() {
                     </Button>
                     {showJiraConfig && (
                       <form onSubmit={handleJiraConnect} className="space-y-3 mt-4">
-                        <div className="rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
-                          Jira Base URL: {jiraSettings.baseUrl || 'Not configured'}
-                        </div>
-                        <Input
-                          placeholder="Jira email"
-                          value={jiraSettings.user}
-                          onChange={(e) =>
-                            setJiraSettings({ ...jiraSettings, user: e.target.value })
-                          }
-                          className="bg-slate-800/50 border-slate-700"
-                        />
+                        {!isAdmin ? (
+                          <Input
+                            placeholder="Jira Base URL (managed by admin)"
+                            value={jiraBaseUrlValue}
+                            disabled
+                            className="bg-slate-800/50 border-slate-700 disabled:opacity-60"
+                          />
+                        ) : (
+                          <div className="text-xs text-slate-400">
+                            Jira Base URL is managed in Admin Settings.
+                          </div>
+                        )}
                         <Input
                           placeholder="Jira email"
                           value={jiraSettings.user}
@@ -764,9 +856,18 @@ export default function SettingsPage() {
                     </Button>
                     {showConfluenceConfig && (
                       <form onSubmit={handleConfluenceConnect} className="space-y-3 mt-4">
-                        <div className="rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs text-slate-400">
-                          Confluence Base URL: {confluenceSettings.baseUrl || 'Not configured'}
-                        </div>
+                        {!isAdmin ? (
+                          <Input
+                            placeholder="Confluence Base URL (managed by admin)"
+                            value={confluenceBaseUrlValue}
+                            disabled
+                            className="bg-slate-800/50 border-slate-700 disabled:opacity-60"
+                          />
+                        ) : (
+                          <div className="text-xs text-slate-400">
+                            Confluence Base URL is managed in Admin Settings.
+                          </div>
+                        )}
                         <Input
                           type="password"
                           placeholder={
@@ -909,6 +1010,20 @@ export default function SettingsPage() {
                   onChange={(e) => setAdminConfluenceBaseUrl(e.target.value)}
                   className="bg-slate-800/50 border-slate-700"
                 />
+                <div>
+                  <div className="text-xs text-slate-400 mb-2">
+                    Nr Sprints to Sync (metrics will be based on this)
+                  </div>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50}
+                    placeholder="10"
+                    value={adminSprintsToSync}
+                    onChange={(e) => setAdminSprintsToSync(e.target.value)}
+                    className="bg-slate-800/50 border-slate-700"
+                  />
+                </div>
               </div>
 
               {adminError && (

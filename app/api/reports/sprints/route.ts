@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
-const CLOSED_SPRINTS_PER_TEAM_LIMIT = 10
+const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
+const MAX_SPRINTS_PER_TEAM_LIMIT = 50
 
 function getTeamKey(name: string) {
   const trimmed = name.trim()
@@ -36,6 +37,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
+    const settings = await prisma.adminSettings.findFirst()
+    const sprintsPerTeamLimit =
+      typeof settings?.sprintsToSync === 'number' && Number.isFinite(settings.sprintsToSync)
+        ? Math.min(Math.max(Math.floor(settings.sprintsToSync), 1), MAX_SPRINTS_PER_TEAM_LIMIT)
+        : DEFAULT_SPRINTS_PER_TEAM_LIMIT
     const cutoffDate = new Date(Date.UTC(2025, 11, 1))
     const snapshots = await prisma.sprintSnapshot.findMany({
       orderBy: { endDate: 'desc' },
@@ -47,7 +53,7 @@ export async function GET(req: NextRequest) {
     for (const snapshot of snapshots) {
       const key = getTeamKey(snapshot.name)
       const list = grouped.get(key) || []
-      if (list.length < CLOSED_SPRINTS_PER_TEAM_LIMIT) {
+      if (list.length < sprintsPerTeamLimit) {
         list.push(snapshot)
         grouped.set(key, list)
       }

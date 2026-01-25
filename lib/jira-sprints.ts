@@ -133,6 +133,7 @@ export interface JiraIssue {
   fields: Record<string, unknown> & {
     summary: string
     description?: string
+    created?: string
     status: {
       name: string
     }
@@ -192,8 +193,6 @@ function countQaBounceBacks(changelog: JiraChangelog | undefined): number {
   const qaStatuses = [
     'in qa',
     'awaiting approval',
-    'awaiting for approval',
-    'waiting for approval',
   ]
   const devStatuses = ['in progress', 'in development', 'in refinement']
   let count = 0
@@ -292,7 +291,7 @@ export async function getIssueChangelogMetrics(
       (a, b) => new Date(a.created).getTime() - new Date(b.created).getTime()
     )
     let closedAt: Date | null = null
-    const closedStatuses = ['closed', 'done', 'resolved']
+    const closedStatuses = ['closed', 'done']
     for (const history of sorted) {
       for (const item of history.items || []) {
         if (item.field !== 'status') continue
@@ -367,13 +366,27 @@ export async function getSprintIssues(
   credentials?: JiraCredentials
 ): Promise<JiraIssue[]> {
   try {
-    const response = await getAgileClient(credentials).get(`/sprint/${sprintId}/issue`, {
-      params: {
-        maxResults: 100,
-      },
-    })
+    const results: JiraIssue[] = []
+    let startAt = 0
+    const maxResults = 100
+    while (true) {
+      const response = await getAgileClient(credentials).get(`/sprint/${sprintId}/issue`, {
+        params: {
+          maxResults,
+          startAt,
+        },
+      })
+      const issues = response.data.issues || []
+      const total = typeof response.data.total === 'number' ? response.data.total : null
+      const pageSize =
+        typeof response.data.maxResults === 'number' ? response.data.maxResults : issues.length
+      results.push(...issues)
+      if (!issues.length) break
+      if (total != null && startAt + issues.length >= total) break
+      startAt += pageSize || issues.length
+    }
 
-    return response.data.issues || []
+    return results
   } catch (error) {
     const axiosError = error as AxiosError
     const errorMessage = axiosError.response?.data || axiosError.message || 'Unknown error'
@@ -617,5 +630,6 @@ export function normalizeIssue(jiraIssue: JiraIssue) {
     status: jiraIssue.fields.status?.name || 'Unknown',
     assignee: jiraIssue.fields.assignee?.displayName,
     priority: jiraIssue.fields.priority?.name,
+    createdAt: jiraIssue.fields.created ? new Date(jiraIssue.fields.created) : null,
   }
 }

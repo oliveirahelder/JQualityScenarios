@@ -9,7 +9,8 @@ export interface JiraCredentials {
   requestTimeout?: number
 }
 
-export function buildJiraCredentialsFromUser(user: {
+export function buildJiraCredentialsFromUser(
+  user: {
   jiraBaseUrl?: string | null
   jiraUser?: string | null
   jiraApiToken?: string | null
@@ -20,7 +21,9 @@ export function buildJiraCredentialsFromUser(user: {
   jiraRequestTimeout?: number | null
   jiraAccessToken?: string | null
   jiraCloudId?: string | null
-}): JiraCredentials | null {
+  },
+  baseUrlOverride?: string | null
+): JiraCredentials | null {
   const boardIds = user.jiraBoardIds
     ? user.jiraBoardIds
         .split(',')
@@ -43,12 +46,13 @@ export function buildJiraCredentialsFromUser(user: {
   const authType = user.jiraAuthType === 'bearer' ? 'bearer' : 'basic'
   const deployment = user.jiraDeployment === 'cloud' ? 'cloud' : 'datacenter'
 
-  if (!user.jiraBaseUrl || !user.jiraApiToken || (authType === 'basic' && !user.jiraUser)) {
+  const baseUrl = baseUrlOverride || user.jiraBaseUrl
+  if (!baseUrl || !user.jiraApiToken || (authType === 'basic' && !user.jiraUser)) {
     return null
   }
 
   return {
-    baseUrl: user.jiraBaseUrl,
+    baseUrl,
     user: user.jiraUser || undefined,
     token: user.jiraApiToken || '',
     authType,
