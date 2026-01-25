@@ -11,6 +11,9 @@ type DocumentationDraft = {
   title: string
   status: string
   content?: string | null
+  requirements?: string | null
+  technicalNotes?: string | null
+  testResults?: string | null
   createdAt: string
   ticket?: { jiraId?: string | null } | null
   sprint?: { name: string } | null
@@ -32,10 +35,37 @@ export default function DocumentationPage() {
   const [selectedDraft, setSelectedDraft] = useState<DocumentationDraft | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [filterStatus, setFilterStatus] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'manual' | 'automation'>('manual')
+  const [isEditing, setIsEditing] = useState(false)
+  const [editDraft, setEditDraft] = useState<{
+    title: string
+    content: string
+    requirements: string
+    technicalNotes: string
+    testResults: string
+  } | null>(null)
+  const [actionError, setActionError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     fetchDrafts()
   }, [])
+
+  useEffect(() => {
+    if (!selectedDraft) {
+      setIsEditing(false)
+      setEditDraft(null)
+      return
+    }
+    setEditDraft({
+      title: selectedDraft.title || '',
+      content: selectedDraft.content || '',
+      requirements: selectedDraft.requirements || '',
+      technicalNotes: selectedDraft.technicalNotes || '',
+      testResults: selectedDraft.testResults || '',
+    })
+    setActionError('')
+  }, [selectedDraft])
 
   const fetchDrafts = async () => {
     try {
@@ -66,6 +96,70 @@ export default function DocumentationPage() {
 
   const uniqueStatuses = Array.from(new Set(drafts.map(d => d.status)))
 
+  const handleSaveDraft = async () => {
+    if (!selectedDraft || !editDraft) return
+    setSaving(true)
+    setActionError('')
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch(`/api/documentation-drafts/${selectedDraft.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: editDraft.title,
+          content: editDraft.content,
+          requirements: editDraft.requirements,
+          technicalNotes: editDraft.technicalNotes,
+          testResults: editDraft.testResults,
+        }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to update draft')
+      }
+
+      await fetchDrafts()
+      setIsEditing(false)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to update draft')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteDraft = async () => {
+    if (!selectedDraft) return
+    const confirmDelete = window.confirm('Delete this draft? This cannot be undone.')
+    if (!confirmDelete) return
+    setSaving(true)
+    setActionError('')
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch(`/api/documentation-drafts/${selectedDraft.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to delete draft')
+      }
+
+      setSelectedDraft(null)
+      await fetchDrafts()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to delete draft')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <main className="min-h-screen pb-12">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -81,11 +175,36 @@ export default function DocumentationPage() {
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Drafts List */}
-          <div className="lg:col-span-2 animate-slideInLeft">
+          <div className="lg:col-span-7 animate-slideInLeft">
             {/* Search and Filter */}
             <div className="mb-6 space-y-4">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setViewMode('manual')}
+                  className={`px-3 py-1.5 rounded-lg font-medium text-xs uppercase tracking-wide transition-all ${
+                    viewMode === 'manual'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'text-slate-400 hover:text-slate-300 border border-transparent hover:border-slate-700'
+                  }`}
+                >
+                  Manual
+                </button>
+                <button
+                  onClick={() => setViewMode('automation')}
+                  className={`px-3 py-1.5 rounded-lg font-medium text-xs uppercase tracking-wide transition-all ${
+                    viewMode === 'automation'
+                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                      : 'text-slate-400 hover:text-slate-300 border border-transparent hover:border-slate-700'
+                  }`}
+                >
+                  Automation
+                </button>
+                <span className="text-xs text-slate-500 ml-2">
+                  Theme: {selectedDraft?.title || 'Select a draft'}
+                </span>
+              </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-500" />
                 <Input
@@ -175,7 +294,9 @@ export default function DocumentationPage() {
                           </div>
 
                           <p className="text-sm text-slate-400 line-clamp-2">
-                            {draft.content || 'No content yet'}
+                            {viewMode === 'automation'
+                              ? draft.technicalNotes || draft.content || 'No automation scenarios yet.'
+                              : draft.testResults || draft.content || 'No manual scenarios yet.'}
                           </p>
 
                           <div className="mt-3 text-xs text-slate-500">
@@ -191,7 +312,7 @@ export default function DocumentationPage() {
           </div>
 
           {/* Draft Details */}
-          <div className="lg:col-span-1 animate-slideInRight">
+          <div className="lg:col-span-5 animate-slideInRight">
             {selectedDraft ? (
               <Card className="glass-card border-slate-700/30 sticky top-24">
                 <CardHeader className="border-b border-slate-700/30">
@@ -202,23 +323,61 @@ export default function DocumentationPage() {
                     </div>
                   </div>
                   <CardTitle className="text-lg">{selectedDraft.title}</CardTitle>
-                  <CardDescription className="mt-2 font-mono">{selectedDraft.ticket?.jiraId}</CardDescription>
+                  <CardDescription className="mt-2 font-mono">
+                    {selectedDraft.ticket?.jiraId || 'Ticket N/A'}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="pt-6">
                   <div className="space-y-6">
-                    <div>
-                      <p className="text-xs text-slate-400 font-semibold uppercase mb-2">Created</p>
-                      <p className="text-sm text-white">
-                        {new Date(selectedDraft.createdAt).toLocaleString()}
-                      </p>
-                    </div>
-
-                    {selectedDraft.sprint && (
-                      <div>
-                        <p className="text-xs text-slate-400 font-semibold uppercase mb-2">Sprint</p>
-                        <p className="text-sm text-white">{selectedDraft.sprint.name}</p>
+                    {actionError ? (
+                      <div className="text-xs text-red-300 bg-red-500/10 border border-red-500/40 rounded-md px-3 py-2">
+                        {actionError}
                       </div>
-                    )}
+                    ) : null}
+
+                    {viewMode === 'automation' ? (
+                      <div>
+                        <p className="text-xs text-slate-400 font-semibold uppercase mb-2">
+                          Gherkin Scenarios
+                        </p>
+                        {isEditing ? (
+                          <textarea
+                            value={editDraft?.technicalNotes || ''}
+                            onChange={(e) =>
+                              setEditDraft((prev) => (prev ? { ...prev, technicalNotes: e.target.value } : prev))
+                            }
+                            rows={8}
+                            className="w-full text-sm text-slate-200 bg-slate-900/40 border border-slate-700/40 rounded-lg p-3 font-mono"
+                          />
+                        ) : (
+                          <div className="text-sm text-slate-200 whitespace-pre-wrap bg-slate-900/40 border border-slate-700/40 rounded-lg p-3 font-mono">
+                            {selectedDraft.technicalNotes || 'No gherkin scenarios saved yet.'}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
+                    {viewMode === 'manual' ? (
+                      <div>
+                        <p className="text-xs text-slate-400 font-semibold uppercase mb-2">
+                          Manual QA (Jira Table)
+                        </p>
+                        {isEditing ? (
+                          <textarea
+                            value={editDraft?.testResults || ''}
+                            onChange={(e) =>
+                              setEditDraft((prev) => (prev ? { ...prev, testResults: e.target.value } : prev))
+                            }
+                            rows={8}
+                            className="w-full text-sm text-slate-200 bg-slate-900/40 border border-slate-700/40 rounded-lg p-3 font-mono"
+                          />
+                        ) : (
+                          <div className="text-sm text-slate-200 whitespace-pre-wrap bg-slate-900/40 border border-slate-700/40 rounded-lg p-3 font-mono">
+                            {selectedDraft.testResults || 'No manual scenarios saved yet.'}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
 
                     {selectedDraft.confluencePageId && (
                       <div>
@@ -227,7 +386,11 @@ export default function DocumentationPage() {
                           variant="ghost"
                           size="sm"
                           className="w-full justify-start text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 group"
-                          onClick={() => window.open(selectedDraft.confluenceUrl, '_blank')}
+                          onClick={() => {
+                            if (selectedDraft.confluenceUrl) {
+                              window.open(selectedDraft.confluenceUrl, '_blank')
+                            }
+                          }}
                         >
                           <ExternalLink className="w-4 h-4 mr-2 group-hover:translate-x-0.5 transition-transform" />
                           View on Confluence
@@ -236,8 +399,29 @@ export default function DocumentationPage() {
                     )}
 
                     <div className="pt-6 border-t border-slate-700/30 space-y-2">
-                      <Button variant="outline" className="w-full border-slate-700 hover:border-slate-600">
-                        Edit Draft
+                      <Button
+                        variant="outline"
+                        className="w-full border-slate-700 hover:border-slate-600"
+                        onClick={() => setIsEditing((prev) => !prev)}
+                      >
+                        {isEditing ? 'Cancel Edit' : 'Edit Draft'}
+                      </Button>
+                      {isEditing ? (
+                        <Button
+                          className="w-full btn-glow bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600"
+                          onClick={handleSaveDraft}
+                          disabled={saving}
+                        >
+                          {saving ? 'Saving...' : 'Save Changes'}
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        className="w-full border-red-500/40 text-red-300 hover:border-red-400 hover:text-red-200"
+                        onClick={handleDeleteDraft}
+                        disabled={saving}
+                      >
+                        Delete Draft
                       </Button>
                       {selectedDraft.status === 'DRAFT' && (
                         <Button className="w-full btn-glow bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600">

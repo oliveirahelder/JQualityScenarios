@@ -134,21 +134,16 @@ export default function GenerateScenariosPage() {
 
   const buildDocumentationContent = (data: ScenarioResult) => {
     const ticketTitle = data.ticketRef?.summary || data.jiraDetails.summary
-    const jiraTable = buildJiraCommentTable(data.manualScenarios, data.scenarios)
-    const gherkin = data.scenarios && data.scenarios.length > 0 ? data.scenarios.join('\n\n') : ''
-    const description = data.jiraDetails.description || ''
     return [
       `# ${data.jiraDetails.id} - ${ticketTitle}`,
       '',
-      '## Manual QA Scenarios (Jira Table)',
-      jiraTable,
-      '',
-      '## Gherkin Scenarios',
-      gherkin || 'No Gherkin scenarios generated.',
-      '',
-      '## Ticket Context',
-      description || 'No description provided.',
+      'Functional QA scenarios generated from ticket details.',
     ].join('\n')
+  }
+
+  const buildGherkinContent = (scenarios?: string[]) => {
+    if (!scenarios || scenarios.length === 0) return 'No Gherkin scenarios generated.'
+    return scenarios.join('\n\n')
   }
 
   const handleSaveToDocs = async () => {
@@ -161,9 +156,12 @@ export default function GenerateScenariosPage() {
     try {
       const token = localStorage.getItem('token')
       const content = buildDocumentationContent(result)
-      const requirements = [result.jiraDetails.description, 'Comments:', result.jiraDetails.status]
+      const requirements = [
+        result.jiraDetails.description,
+        result.jiraDetails.comments ? `Comments:\n${result.jiraDetails.comments}` : null,
+      ]
         .filter(Boolean)
-        .join('\n')
+        .join('\n\n')
       const response = await fetch('/api/documentation-drafts', {
         method: 'POST',
         headers: {
@@ -176,6 +174,7 @@ export default function GenerateScenariosPage() {
           title: `${result.jiraDetails.id} - QA Scenarios`,
           content,
           requirements,
+          technicalNotes: buildGherkinContent(result.scenarios),
           testResults: buildJiraCommentTable(result.manualScenarios, result.scenarios),
         }),
       })

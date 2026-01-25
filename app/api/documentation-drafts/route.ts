@@ -93,16 +93,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Ticket not found' }, { status: 404 })
     }
 
-    // Check if draft already exists for this ticket
+    // Upsert draft by ticketId so scenarios can be re-saved
     const existingDraft = await prisma.documentationDraft.findUnique({
       where: { ticketId },
     })
 
     if (existingDraft) {
-      return NextResponse.json(
-        { error: 'Draft already exists for this ticket' },
-        { status: 409 }
-      )
+      const draft = await prisma.documentationDraft.update({
+        where: { ticketId },
+        data: {
+          title,
+          content,
+          requirements,
+          technicalNotes,
+          testResults,
+        },
+      })
+      return NextResponse.json({ draft, updated: true }, { status: 200 })
     }
 
     const draft = await prisma.documentationDraft.create({
@@ -119,7 +126,7 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    return NextResponse.json({ draft }, { status: 201 })
+    return NextResponse.json({ draft, updated: false }, { status: 201 })
   } catch (error) {
     console.error('Error creating draft:', error)
     return NextResponse.json(
