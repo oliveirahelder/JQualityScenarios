@@ -18,6 +18,17 @@ const END_STATUSES = [...QA_READY_STATUSES, ...CLOSED_STATUSES]
 const METRICS_CACHE_TTL_MS = 30_000
 const metricsCache = new Map<string, { timestamp: number; payload: unknown }>()
 
+type TicketTimeEntry = {
+  jiraId: string
+  summary: string
+  assignee: string
+  workHours: number
+  storyPoints: number
+  hoursPerStoryPoint: number | null
+  devStart: string
+  endAt: string
+}
+
 type JiraTicketLite = {
   status?: string | null
   storyPoints?: number | null
@@ -333,11 +344,28 @@ export async function GET(request: NextRequest) {
         totalHours: number
         averageHours: number
         ticketCount: number
-      }>
+          }>
+    }> = []
+    const deliveryTicketTimesBySprint: Array<{
+      sprintId: string
+      sprintName: string
+      sprintStart: string
+      sprintEnd: string
+      tickets: TicketTimeEntry[]
     }> = []
 
     if (includeDeliveryTimes) {
       for (const sprint of activeSprints) {
+        const ticketMeta = new Map<string, { summary: string; storyPoints: number; assignee: string }>()
+        for (const ticket of sprint.tickets || []) {
+          if (!ticket.jiraId) continue
+          ticketMeta.set(ticket.jiraId, {
+            summary: ticket.summary || '',
+            storyPoints: ticket.storyPoints || 0,
+            assignee: ticket.assignee || '',
+          })
+        }
+        const ticketTimes: TicketTimeEntry[] = []
         const sprintHours = new Map<
           string,
           { totalHours: number; ticketCount: number; startedCount: number; endedInSprintCount: number }
@@ -352,6 +380,19 @@ export async function GET(request: NextRequest) {
           )
           if (!timing) continue
           const assigneeName = timing.assigneeAtStart || ticket.assignee
+          const meta = ticketMeta.get(ticket.jiraId)
+          const storyPoints = meta?.storyPoints || 0
+          ticketTimes.push({
+            jiraId: ticket.jiraId,
+            summary: meta?.summary || ticket.summary || '',
+            assignee: assigneeName,
+            workHours: Math.round(timing.workHours * 10) / 10,
+            storyPoints,
+            hoursPerStoryPoint:
+              storyPoints > 0 ? Math.round((timing.workHours / storyPoints) * 10) / 10 : null,
+            devStart: timing.devStart.toISOString(),
+            endAt: timing.endAt.toISOString(),
+          })
           const sprintEntry = sprintHours.get(assigneeName) || {
             totalHours: 0,
             ticketCount: 0,
@@ -401,6 +442,13 @@ export async function GET(request: NextRequest) {
           sprintName: sprint.name,
           entries: sprintEntries,
         })
+        deliveryTicketTimesBySprint.push({
+          sprintId: sprint.id,
+          sprintName: sprint.name,
+          sprintStart: sprint.startDate.toISOString(),
+          sprintEnd: sprint.endDate.toISOString(),
+          tickets: ticketTimes,
+        })
       }
     }
     const deliveryTimes = Array.from(workHoursByAssignee.entries())
@@ -418,7 +466,7 @@ export async function GET(request: NextRequest) {
     const lastSprintSnapshots = await prisma.sprintSnapshot.findMany({
       where: { status: { in: ['COMPLETED', 'CLOSED'] } },
       orderBy: { endDate: 'desc' },
-      take: 5,
+      take: 10,
     })
 
     const storyPointAverages = new Map<string, { total: number; closed: number; sprintCount: number }>()
@@ -474,6 +522,58 @@ export async function GET(request: NextRequest) {
         avgStoryPointsClosed: storyPointAveragesMap.get(entry.name)?.avgStoryPointsClosed ?? 0,
         storyPointSprintCount: storyPointAveragesMap.get(entry.name)?.sprintCount ?? 0,
       })),
+    }))
+
+    const capacityByDeveloper = new Map<string, { totalSpPerDay: number; sprintCount: number }>()
+    for (const snapshot of lastSprintSnapshots) {
+      const sprintStart = new Date(snapshot.startDate)
+      const sprintEnd = new Date(snapshot.endDate)
+      const sprintDays = businessHoursBetween(sprintStart, sprintEnd) / 8
+      if (!sprintDays) continue
+      const ticketTimes = snapshot.ticketTimes ? JSON.parse(snapshot.ticketTimes) : []
+      if (Array.isArray(ticketTimes) && ticketTimes.length > 0) {
+        for (const entry of ticketTimes as Array<{
+          assignee?: string
+          storyPoints?: number
+          devStart?: string
+          endAt?: string
+        }>) {
+          if (!entry.assignee || !entry.storyPoints) continue
+          if (entry.devStart && entry.endAt) {
+            const devStart = new Date(entry.devStart)
+            const endAt = new Date(entry.endAt)
+            if (devStart < sprintStart || endAt > sprintEnd) continue
+          }
+          const record = capacityByDeveloper.get(entry.assignee) || {
+            totalSpPerDay: 0,
+            sprintCount: 0,
+          }
+          record.totalSpPerDay += entry.storyPoints / sprintDays
+          record.sprintCount += 1
+          capacityByDeveloper.set(entry.assignee, record)
+        }
+      } else {
+        const assignees = snapshot.assignees ? JSON.parse(snapshot.assignees) : []
+        if (!Array.isArray(assignees)) continue
+        for (const assignee of assignees as Array<{ name?: string; closedPoints?: number }>) {
+          if (!assignee.name || !assignee.closedPoints) continue
+          const record = capacityByDeveloper.get(assignee.name) || {
+            totalSpPerDay: 0,
+            sprintCount: 0,
+          }
+          record.totalSpPerDay += assignee.closedPoints / sprintDays
+          record.sprintCount += 1
+          capacityByDeveloper.set(assignee.name, record)
+        }
+      }
+    }
+
+    const capacityAverages = Array.from(capacityByDeveloper.entries()).map(([name, entry]) => ({
+      name,
+      avgSpPerDay: entry.sprintCount
+        ? Math.round((entry.totalSpPerDay / entry.sprintCount) * 10) / 10
+        : 0,
+      sprintCount: entry.sprintCount,
     }))
     const previousSprints = (await prisma.sprint.findMany({
       where: { status: { in: ['CLOSED', 'COMPLETED'] } },
@@ -613,7 +713,9 @@ export async function GET(request: NextRequest) {
       assignees,
       deliveryTimes: includeDeliveryTimes ? deliveryTimesWithPoints : [],
       deliveryTimesBySprint: includeDeliveryTimes ? deliveryTimesBySprintWithPoints : [],
+      deliveryTicketTimesBySprint: includeDeliveryTimes ? deliveryTicketTimesBySprint : [],
       storyPointAverages: storyPointAveragesList,
+      capacityAverages,
     }
 
     metricsCache.set(cacheKey, {
