@@ -531,6 +531,27 @@ export async function GET(request: NextRequest) {
         Math.ceil((now.getTime() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24))
       )
       const previousForTeam = previousSprintsByTeam.get(teamKey)?.[0] || null
+      const previousTickets = previousForTeam?.tickets || []
+      const previousTeamSize = previousForTeam
+        ? new Set(
+            previousTickets
+              .map((ticket) => (ticket.assignee || '').trim())
+              .filter(Boolean)
+          ).size
+        : 0
+      const previousTotalTickets = previousForTeam
+        ? typeof previousForTeam.totalTickets === 'number' && previousForTeam.totalTickets > 0
+          ? previousForTeam.totalTickets
+          : previousTickets.length
+        : 0
+      const previousStoryPointsTotal = previousForTeam
+        ? previousForTeam.storyPointsTotal > 0
+          ? previousForTeam.storyPointsTotal
+          : previousTickets.reduce(
+              (sum: number, ticket: JiraTicketLite) => sum + (ticket.storyPoints || 0),
+              0
+            )
+        : 0
       const previousPeriodEnd =
         previousForTeam && elapsedDays > 0
           ? new Date(previousForTeam.startDate.getTime() + elapsedDays * 24 * 60 * 60 * 1000)
@@ -558,6 +579,9 @@ export async function GET(request: NextRequest) {
         activeStoryPointsClosed: activeMetrics?.storyPointsCompleted ?? 0,
         previousSprintId: previousForTeam?.id ?? null,
         previousSprintName: previousForTeam?.name ?? null,
+        previousTeamSize,
+        previousTotalTickets,
+        previousStoryPointsTotal,
         previousClosedTickets: previousClosedInPeriod.length,
         previousStoryPointsClosed: previousStoryPointsInPeriod,
         periodDays: elapsedDays,

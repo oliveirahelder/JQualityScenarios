@@ -53,9 +53,9 @@ type MetricCard = {
 
 export default function Dashboard() {
   const [metricsLoading, setMetricsLoading] = useState(true)
-  const [deliveryLoading, setDeliveryLoading] = useState(false)
   const [selectedSprintId, setSelectedSprintId] = useState<string | null>(null)
   const [selectedActiveSprintId, setSelectedActiveSprintId] = useState<string | null>(null)
+  const [selectedDevSprintId, setSelectedDevSprintId] = useState<string | null>(null)
   const [metricValues, setMetricValues] = useState({
     activeSprintCount: null as number | null,
     activeSprints: [] as Array<{
@@ -99,6 +99,9 @@ export default function Dashboard() {
       activeStoryPointsClosed: number
       previousSprintId: string | null
       previousSprintName: string | null
+      previousTeamSize: number
+      previousTotalTickets: number
+      previousStoryPointsTotal: number
       previousClosedTickets: number
       previousStoryPointsClosed: number
       periodDays: number
@@ -110,32 +113,7 @@ export default function Dashboard() {
       bounce: number
       inProgress: number
     }>,
-    deliveryTimes: [] as Array<{
-      name: string
-      ticketCount: number
-      averageHours: number
-      totalHours: number
-      avgStoryPointsAllocated?: number
-      avgStoryPointsClosed?: number
-      storyPointSprintCount?: number
-    }>,
-    deliveryTimesBySprint: [] as Array<{
-      sprintId: string
-      sprintName: string
-      entries: Array<{
-        name: string
-        ticketCount: number
-        averageHours: number
-        totalHours: number
-        carryoverCount?: number
-        carryoverRate?: number
-        avgStoryPointsAllocated?: number
-        avgStoryPointsClosed?: number
-        storyPointSprintCount?: number
-      }>
-    }>,
   })
-  const [deliverySprintId, setDeliverySprintId] = useState('all')
   useEffect(() => {
     const loadMetrics = async () => {
       try {
@@ -168,30 +146,7 @@ export default function Dashboard() {
       }
     }
 
-    const loadDeliveryTimes = async () => {
-      try {
-        setDeliveryLoading(true)
-        const authToken = localStorage.getItem('token')
-        const response = await fetch('/api/metrics/jira?includeDeliveryTimes=1', {
-          headers: { Authorization: `Bearer ${authToken}` },
-        })
-        if (!response.ok) {
-          return
-        }
-        const data = await response.json()
-        setMetricValues((prev) => ({
-          ...prev,
-          deliveryTimes: data.deliveryTimes || [],
-          deliveryTimesBySprint: data.deliveryTimesBySprint || [],
-        }))
-      } catch {
-        // Keep current delivery times on error
-      } finally {
-        setDeliveryLoading(false)
-      }
-    }
-
-    loadMetrics().then(loadDeliveryTimes)
+    loadMetrics()
   }, [])
 
   useEffect(() => {
@@ -212,6 +167,15 @@ export default function Dashboard() {
     setSelectedActiveSprintId(sorted[0]?.id || null)
   }, [metricValues.activeSprints, selectedActiveSprintId])
 
+  useEffect(() => {
+    if (metricValues.activeSprints.length === 0) return
+    if (selectedDevSprintId) return
+    const sorted = [...metricValues.activeSprints].sort(
+      (a, b) => b.devTickets - a.devTickets || a.name.localeCompare(b.name)
+    )
+    setSelectedDevSprintId(sorted[0]?.id || null)
+  }, [metricValues.activeSprints, selectedDevSprintId])
+
   const totalDevTickets = metricValues.activeSprints.reduce(
     (sum, sprint) => sum + sprint.devTickets,
     0
@@ -220,6 +184,9 @@ export default function Dashboard() {
     (sum, sprint) => sum + sprint.qaTickets,
     0
   )
+  const currentDevSprint =
+    metricValues.activeSprints.find((sprint) => sprint.id === selectedDevSprintId) ||
+    metricValues.activeSprints[0]
   const totalTickets = metricValues.activeSprints.reduce(
     (sum, sprint) => sum + sprint.totalTickets,
     0
@@ -263,6 +230,9 @@ export default function Dashboard() {
   const topContributor = selectedSprint?.assignees
     ? [...selectedSprint.assignees].sort((a, b) => b.closed - a.closed)[0]
     : null
+  const bottomContributor = selectedSprint?.assignees
+    ? [...selectedSprint.assignees].sort((a, b) => a.closed - b.closed)[0]
+    : null
   const currentTicketsClosed =
     selectedComparison?.activeClosedTickets ?? selectedSprint?.doneTickets ?? 0
   const currentStoryPointsClosed =
@@ -271,7 +241,7 @@ export default function Dashboard() {
   const generalMetrics = [
     {
       title: 'Sprint Delivery',
-      value: metricsLoading ? '--' : currentTicketsClosed,
+      value: metricsLoading ? '--' : `${currentTicketsClosed} Tickets`,
       subtitle: selectedSprint ? `Current sprint: ${selectedSprint.name}` : 'Current sprint',
       icon: CheckCircle2,
       color: 'from-green-600 to-green-500',
@@ -299,15 +269,21 @@ export default function Dashboard() {
         ? [
             {
               label: 'Team size',
-              value: `${selectedSprint.assignees.length} devs`,
+              value: selectedComparison?.previousSprintId
+                ? `${selectedSprint.assignees.length} devs (prev ${selectedComparison.previousTeamSize})`
+                : `${selectedSprint.assignees.length} devs`,
             },
             {
               label: 'Board tickets',
-              value: `${selectedSprint.totalTickets}`,
+              value: selectedComparison?.previousSprintId
+                ? `${selectedSprint.totalTickets} (prev ${selectedComparison.previousTotalTickets})`
+                : `${selectedSprint.totalTickets}`,
             },
             {
               label: 'Story points (total)',
-              value: `${selectedSprint.storyPointsTotal}`,
+              value: selectedComparison?.previousSprintId
+                ? `${selectedSprint.storyPointsTotal} (prev ${selectedComparison.previousStoryPointsTotal})`
+                : `${selectedSprint.storyPointsTotal}`,
             },
             {
               label: 'Tickets closed',
@@ -326,6 +302,12 @@ export default function Dashboard() {
             {
               label: 'Top contributor',
               value: topContributor ? `${topContributor.name} (${topContributor.closed} SP)` : '--',
+            },
+            {
+              label: 'Lowest contributor',
+              value: bottomContributor
+                ? `${bottomContributor.name} (${bottomContributor.closed} SP)`
+                : '--',
             },
             selectedComparison?.previousSprintId
               ? {
@@ -393,17 +375,48 @@ export default function Dashboard() {
     },
     {
       title: 'Tickets In Development',
-      value: metricsLoading ? '--' : `${totalDevTickets} / ${totalQaTickets}`,
-      subtitle: 'Dev / QA (active)',
+      value: metricsLoading
+        ? '--'
+        : currentDevSprint
+        ? `${currentDevSprint.devTickets} / ${currentDevSprint.qaTickets}`
+        : `${totalDevTickets} / ${totalQaTickets}`,
+      subtitle: currentDevSprint ? `Sprint: ${currentDevSprint.name}` : 'Dev / QA (active)',
       icon: Zap,
       color: 'from-purple-600 to-purple-500',
       trend: metricsLoading ? '...' : '',
-      href: '/sprints?filter=active',
-      rows: metricValues.activeSprints.map((sprint) => ({
-        label: sprint.name,
-        value: `${sprint.devTickets} / ${sprint.qaTickets}`,
-        href: `/sprints?sprintId=${sprint.id}&filter=active&devOnly=1`,
-      })),
+      filter: (
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="text-slate-400">Sprint</span>
+          <select
+            className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+            value={currentDevSprint?.id || ''}
+            onChange={(event) => setSelectedDevSprintId(event.target.value || null)}
+          >
+            {metricValues.activeSprints
+              .slice()
+              .sort((a, b) => b.devTickets - a.devTickets || a.name.localeCompare(b.name))
+              .map((sprint) => (
+                <option key={sprint.id} value={sprint.id}>
+                  {sprint.teamKey} - {sprint.name}
+                </option>
+              ))}
+          </select>
+        </div>
+      ),
+      rows: currentDevSprint
+        ? [
+            {
+              label: 'In development',
+              value: `${currentDevSprint.devTickets}`,
+              href: `/sprints?sprintId=${currentDevSprint.id}&filter=active&devOnly=1`,
+            },
+            {
+              label: 'In QA',
+              value: `${currentDevSprint.qaTickets}`,
+              href: `/sprints?sprintId=${currentDevSprint.id}&filter=active&qaOnly=1`,
+            },
+          ]
+        : [],
     },
     {
       title: 'Bounce-back %',
@@ -472,13 +485,6 @@ export default function Dashboard() {
     ],
   }))
 
-  const selectedDeliveryEntries =
-    deliverySprintId === 'all'
-      ? metricValues.deliveryTimes
-      : metricValues.deliveryTimesBySprint.find(
-          (sprint) => sprint.sprintId === deliverySprintId
-        )?.entries || []
-
   const assigneesMetric = {
     title: 'Assignees',
     value: metricsLoading ? '--' : metricValues.assignees.length,
@@ -511,48 +517,11 @@ export default function Dashboard() {
     })),
   }
 
-  const deliveryTimeMetric = {
-    title: 'Delivery Time',
-    value: metricsLoading || deliveryLoading ? '--' : selectedDeliveryEntries.length,
-    subtitle: 'Average business hours per ticket',
-    icon: Zap,
-    color: 'from-sky-600 to-sky-500',
-    trend: metricsLoading || deliveryLoading ? '...' : '',
-    loading: deliveryLoading,
-    filter: (
-      <div className="flex items-center justify-between gap-3 text-xs">
-        <span className="text-slate-400">Sprint</span>
-        <select
-          className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
-          value={deliverySprintId}
-          onChange={(event) => setDeliverySprintId(event.target.value)}
-        >
-          <option value="all">All active sprints</option>
-          {metricValues.activeSprints.map((sprint) => (
-            <option key={sprint.id} value={sprint.id}>
-              {sprint.name}
-            </option>
-          ))}
-        </select>
-      </div>
-    ),
-    columns: ['Assignee', 'Tickets', 'Avg Hours', 'Avg SP (last 5)', 'Carryover'],
-    rows: selectedDeliveryEntries.map((entry) => ({
-      label: entry.name,
-      columns: [
-        entry.name,
-        `${entry.ticketCount}`,
-        `${entry.averageHours}h`,
-        `${entry.avgStoryPointsAllocated ?? 0} / ${entry.avgStoryPointsClosed ?? 0}`,
-        entry.carryoverRate != null ? `${entry.carryoverRate}%` : '--',
-      ],
-    })),
-  }
 
   const renderMetricCard = (metric: MetricCard, key: string) => {
     const showSkeleton = metric.loading ?? metricsLoading
     const card = (
-      <div className="glass-card rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all duration-300 animate-slideInUp">
+      <div className="glass-card rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all duration-300 animate-slideInUp h-full">
         <div className={`h-1 bg-gradient-to-r ${metric.color}`}></div>
         <CardContent className="p-6">
           <div className="flex items-start justify-between mb-4">
@@ -572,7 +541,15 @@ export default function Dashboard() {
               <span className="text-xs text-green-400 font-semibold">{metric.trend}</span>
             </div>
           ) : null}
-          {metric.filter ? <div className="mt-3">{metric.filter}</div> : null}
+          {metric.filter ? (
+            <div
+              className="mt-3"
+              onClick={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              {metric.filter}
+            </div>
+          ) : null}
           {!showSkeleton && metric.rows?.length ? (
             <div className="mt-4 space-y-2 text-xs text-slate-300">
               {metric.columns ? (
@@ -682,7 +659,7 @@ export default function Dashboard() {
       </div>
     )
 
-    if (!metric.href) {
+    if (!metric.href || metric.filter) {
       return <div key={key}>{card}</div>
     }
     return (
@@ -762,16 +739,6 @@ export default function Dashboard() {
             <p className="text-slate-400 text-sm">Assigned workload across active sprints</p>
           </div>
           {renderMetricCard(assigneesMetric, 'assignees')}
-        </div>
-
-        <div className="mb-8">
-          <div className="mb-4">
-            <h2 className="text-2xl font-bold text-white">Delivery Time</h2>
-            <p className="text-slate-400 text-sm">
-              Time from In Progress to Closed (8h business days)
-            </p>
-          </div>
-          {renderMetricCard(deliveryTimeMetric, 'delivery-time')}
         </div>
 
         <div className="mb-12">

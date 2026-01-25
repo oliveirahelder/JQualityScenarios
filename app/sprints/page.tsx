@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Calendar, AlertCircle, ChevronRight, Zap, RefreshCw, Code2, CheckSquare, FileText } from 'lucide-react'
+import { Calendar, AlertCircle, ChevronRight, Zap, RefreshCw, CheckSquare, FileText } from 'lucide-react'
 
 export default function SprintsPage() {
   type SprintTicket = {
@@ -68,7 +68,7 @@ export default function SprintsPage() {
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all')
   const [selectedSprintName, setSelectedSprintName] = useState('')
   const [filterBySprint, setFilterBySprint] = useState<
-    Record<string, 'all' | 'dev' | 'closed' | 'bounce'>
+    Record<string, 'all' | 'dev' | 'qa' | 'closed' | 'bounce'>
   >({})
   const [sortBySprint, setSortBySprint] = useState<
     Record<string, 'status' | 'story' | 'bounce'>
@@ -215,6 +215,11 @@ export default function SprintsPage() {
     )
   }
 
+  const isQaStatus = (status: string | undefined) => {
+    const value = (status || '').toLowerCase()
+    return value.includes('in qa')
+  }
+
   const getQaDoneTickets = (sprint: SprintItem) => {
     const qaDone = sprint?.snapshotTotals?.qaDoneTickets
     if (typeof qaDone === 'number') return qaDone
@@ -296,10 +301,19 @@ export default function SprintsPage() {
     }
     const sprintId = searchParams.get('sprintId')
     const devOnly = searchParams.get('devOnly') === '1'
+    const qaOnly = searchParams.get('qaOnly') === '1'
     const closedOnly = searchParams.get('closedOnly') === '1'
     const bounceOnly = searchParams.get('bounceOnly') === '1'
     const assignee = searchParams.get('assignee')
-    const nextFilter = devOnly ? 'dev' : closedOnly ? 'closed' : bounceOnly ? 'bounce' : 'all'
+    const nextFilter = devOnly
+      ? 'dev'
+      : qaOnly
+      ? 'qa'
+      : closedOnly
+      ? 'closed'
+      : bounceOnly
+      ? 'bounce'
+      : 'all'
     if (sprintId) {
       setFilterBySprint((prev) => ({
         ...prev,
@@ -630,6 +644,7 @@ export default function SprintsPage() {
                                     [sprint.id]: event.target.value as
                                       | 'all'
                                       | 'dev'
+                                      | 'qa'
                                       | 'closed'
                                       | 'bounce',
                                   }))
@@ -638,6 +653,7 @@ export default function SprintsPage() {
                               >
                                 <option value="all">All tickets</option>
                                 <option value="dev">In Dev only</option>
+                                <option value="qa">In QA only</option>
                                 <option value="closed">Closed only</option>
                                 <option value="bounce">Bounce only</option>
                               </select>
@@ -687,6 +703,9 @@ export default function SprintsPage() {
                               const filterValue = filterBySprint[sprint.id] || 'all'
                               const filtered = (sprint.tickets || []).filter((ticket: SprintTicket) => {
                                 if (filterValue === 'dev' && !isDevStatus(ticket.status || undefined)) return false
+                                if (filterValue === 'qa' && !isQaStatus(ticket.status || undefined)) {
+                                  return false
+                                }
                                 if (filterValue === 'closed' && !isClosedStatus(ticket.status || undefined)) {
                                   return false
                                 }

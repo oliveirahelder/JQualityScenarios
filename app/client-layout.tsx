@@ -1,6 +1,6 @@
 'use client'
 
-import Navbar from '@/components/Navbar'
+import Sidebar from '@/components/Sidebar'
 import { usePathname } from 'next/navigation'
 
 export default function ClientLayout({
@@ -9,14 +9,14 @@ export default function ClientLayout({
   children: React.ReactNode
 }) {
   const pathname = usePathname()
-  const showNavbar = pathname !== '/login'
+  const showSidebar = pathname !== '/login'
 
   return (
-    <>
-      {showNavbar && <Navbar />}
-      <main className="min-h-screen">
+    <div className="min-h-screen flex">
+      {showSidebar ? <Sidebar /> : null}
+      <main className="flex-1 min-h-screen">
         {children}
       </main>
-    </>
+    </div>
   )
 }
