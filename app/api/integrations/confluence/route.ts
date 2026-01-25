@@ -22,8 +22,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
+    const adminSettings = await prisma.adminSettings.findFirst()
     return NextResponse.json({
-      baseUrl: user.confluenceBaseUrl || process.env.CONFLUENCE_BASE_URL || '',
+      baseUrl:
+        adminSettings?.confluenceBaseUrl ||
+        user.confluenceBaseUrl ||
+        process.env.CONFLUENCE_BASE_URL ||
+        '',
       hasToken: Boolean(user.confluenceApiToken),
       connectionStatus: user.confluenceConnectionStatus || '',
       connectionCheckedAt: user.confluenceConnectionCheckedAt?.toISOString() || '',
@@ -70,19 +75,31 @@ export async function PUT(req: NextRequest) {
       confluenceDeployment?: string | null
       confluenceConnectionStatus?: string | null
       confluenceConnectionCheckedAt?: Date | null
-    } = {
-      confluenceAuthType: 'bearer',
-      confluenceDeployment: 'datacenter',
-      confluenceConnectionStatus: null,
-      confluenceConnectionCheckedAt: null,
-    }
+    } = {}
 
     if (typeof normalizedBaseUrl === 'string' && isAdmin) {
-      updateData.confluenceBaseUrl = normalizedBaseUrl || null
+      const existing = await prisma.adminSettings.findFirst()
+      if (existing) {
+        await prisma.adminSettings.update({
+          where: { id: existing.id },
+          data: { confluenceBaseUrl: normalizedBaseUrl || null },
+        })
+      } else {
+        await prisma.adminSettings.create({
+          data: { confluenceBaseUrl: normalizedBaseUrl || null },
+        })
+      }
     }
 
     if (confluenceToken) {
       updateData.confluenceApiToken = confluenceToken
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      updateData.confluenceAuthType = 'bearer'
+      updateData.confluenceDeployment = 'datacenter'
+      updateData.confluenceConnectionStatus = null
+      updateData.confluenceConnectionCheckedAt = null
     }
 
     await prisma.user.update({

@@ -12,8 +12,19 @@ function normalizeSqliteUrl(value: string | undefined) {
   return value
 }
 
-const nextDbUrl = normalizeSqliteUrl(process.env.DATABASE_URL)
-const nextMigrationUrl = normalizeSqliteUrl(process.env.DATABASE_MIGRATION_URL)
+function forceLocalSqlite(value: string | undefined) {
+  const absolutePath = path.resolve(process.cwd(), 'prisma', 'database.db')
+  const fallback = `file:${absolutePath.replace(/\\/g, '/')}`
+  if (!value) return fallback
+  const normalized = value.replace(/\\/g, '/')
+  if (!normalized.startsWith('file:')) return value
+  return fallback
+}
+
+const nextDbUrl = forceLocalSqlite(normalizeSqliteUrl(process.env.DATABASE_URL))
+const nextMigrationUrl = forceLocalSqlite(
+  normalizeSqliteUrl(process.env.DATABASE_MIGRATION_URL)
+)
 if (nextDbUrl && nextDbUrl !== process.env.DATABASE_URL) {
   process.env.DATABASE_URL = nextDbUrl
 }

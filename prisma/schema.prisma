@@ -40,6 +40,10 @@ model User {
   confluenceDeployment String?
   confluenceConnectionStatus String?
   confluenceConnectionCheckedAt DateTime?
+  githubUser String?
+  githubApiToken String?
+  githubConnectionStatus String?
+  githubConnectionCheckedAt DateTime?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -48,6 +52,16 @@ model User {
   testScenarios TestScenario[]
 
   @@map("users")
+}
+
+model AdminSettings {
+  id               String   @id @default(cuid())
+  jiraBaseUrl      String?
+  confluenceBaseUrl String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("admin_settings")
 }
 
 // Sprint model - tracks Sprint creation and dates
