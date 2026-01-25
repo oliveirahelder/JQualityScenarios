@@ -124,6 +124,7 @@ model Ticket {
   status    String     @default("TODO")
   assignee  String?
   priority  String?
+  issueType String?
   storyPoints Float?
   qaBounceBackCount Int @default(0)
   prCount   Int       @default(0)

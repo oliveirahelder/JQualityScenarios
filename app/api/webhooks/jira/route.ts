@@ -13,7 +13,11 @@ type JiraChangelogItem = {
 
 type JiraIssuePayload = {
   key?: string
-  fields?: Record<string, unknown>
+  fields?: Record<string, unknown> & {
+    issuetype?: {
+      name?: string
+    }
+  }
 }
 
 type JiraSprintPayload = {
@@ -164,6 +168,7 @@ async function handleIssueCreated(body: JiraWebhookBody) {
         status: normalized.status,
         assignee: normalized.assignee,
         priority: normalized.priority,
+        issueType: normalized.issueType || null,
         grossTime: Math.max(0, grossTime),
         jiraCreatedAt,
       },

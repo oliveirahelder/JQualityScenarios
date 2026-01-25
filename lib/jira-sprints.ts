@@ -137,6 +137,9 @@ export interface JiraIssue {
     status: {
       name: string
     }
+    issuetype?: {
+      name?: string
+    }
     assignee?: {
       displayName: string
       emailAddress: string
@@ -631,5 +634,6 @@ export function normalizeIssue(jiraIssue: JiraIssue) {
     assignee: jiraIssue.fields.assignee?.displayName,
     priority: jiraIssue.fields.priority?.name,
     createdAt: jiraIssue.fields.created ? new Date(jiraIssue.fields.created) : null,
+    issueType: jiraIssue.fields.issuetype?.name || '',
   }
 }

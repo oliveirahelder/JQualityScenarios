@@ -106,6 +106,20 @@ export default function Dashboard() {
       previousStoryPointsClosed: number
       periodDays: number
     }>,
+    storyPointsByTeam: [] as Array<{
+      teamKey: string
+      activeSprintId: string
+      activeSprintName: string
+      activeStoryPointsTotal: number
+      activeStoryPointsClosed: number
+      previousSprintId: string | null
+      previousSprintName: string | null
+      previousStoryPointsTotal: number
+      previousStoryPointsClosed: number
+      averageStoryPointsTotal: number
+      averageStoryPointsClosed: number
+      averageSprintCount: number
+    }>,
     assignees: [] as Array<{
       name: string
       total: number
@@ -135,6 +149,7 @@ export default function Dashboard() {
           },
           finishedComparison: data.finishedComparison ?? null,
           finishedComparisonByTeam: data.finishedComparisonByTeam || [],
+          storyPointsByTeam: data.storyPointsByTeam || [],
           assignees: data.assignees || [],
           deliveryTimes: data.deliveryTimes || [],
           deliveryTimesBySprint: data.deliveryTimesBySprint || [],
@@ -436,16 +451,16 @@ export default function Dashboard() {
         metricValues.storyPoints.currentTotal != null
           ? metricValues.storyPoints.currentTotal
           : '--',
-      subtitle: 'Per active sprint',
+      subtitle: 'Avg story points closed (last 10 sprints)',
       icon: BookOpen,
       color: 'from-cyan-600 to-cyan-500',
       trend:
         metricValues.storyPoints.delta != null
           ? `${metricValues.storyPoints.delta >= 0 ? '+' : ''}${metricValues.storyPoints.delta}`
           : '',
-      rows: metricValues.activeSprints.map((sprint) => ({
-        label: sprint.name,
-        value: `${sprint.storyPointsTotal}`,
+      rows: metricValues.storyPointsByTeam.map((entry) => ({
+        label: `${entry.teamKey} - ${entry.activeSprintName}`,
+        value: `${entry.averageStoryPointsClosed} SP avg (last 10)`,
       })),
     },
     {

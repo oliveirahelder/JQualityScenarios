@@ -20,6 +20,7 @@ export default function SprintsPage() {
     jiraCreatedAt?: string | Date | null
     jiraClosedAt?: string | Date | null
     carryoverCount?: number | null
+    issueType?: string | null
     devInsights?: Array<{
       id: string
       prUrl?: string | null
@@ -89,6 +90,21 @@ export default function SprintsPage() {
       return isClosedStatus(ticket?.status || undefined)
     }).length
     return { closed, total }
+  }
+
+  const getDevelopersCount = (tickets: SprintTicket[] | undefined) => {
+    if (!tickets || tickets.length === 0) return 0
+    const names = new Set(
+      tickets
+        .filter(
+          (ticket) =>
+            isDevStatus(ticket.status || undefined) ||
+            isQaStatus(ticket.status || undefined)
+        )
+        .map((ticket) => (ticket.assignee || '').trim())
+        .filter(Boolean)
+    )
+    return names.size
   }
 
   const getSprintSuccess = (sprint: SprintItem) => {
@@ -212,7 +228,9 @@ export default function SprintsPage() {
     return (
       value.includes('ready for release') ||
       value.includes('awaiting approval') ||
-      value.includes('in release')
+      value.includes('in release') ||
+      value.includes('done') ||
+      value.includes('closed')
     )
   }
 
@@ -588,7 +606,7 @@ export default function SprintsPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mt-4 pt-4 border-t border-slate-700/30">
+                      <div className="grid grid-cols-2 md:grid-cols-7 gap-4 mt-4 pt-4 border-t border-slate-700/30">
                         <div>
                           <div className="text-slate-500 text-xs mb-1">Tickets Finished</div>
                           <div className="text-xl font-bold text-white">{getFinishedTickets(sprint)}</div>
@@ -596,6 +614,12 @@ export default function SprintsPage() {
                         <div>
                           <div className="text-slate-500 text-xs mb-1">Tickets Planned</div>
                           <div className="text-xl font-bold text-white">{getPlannedTickets(sprint)}</div>
+                        </div>
+                        <div>
+                          <div className="text-slate-500 text-xs mb-1">Developers</div>
+                          <div className="text-xl font-bold text-white">
+                            {getDevelopersCount(sprint.tickets)}
+                          </div>
                         </div>
                         <div>
                           <div className="text-slate-500 text-xs mb-1">QA Done</div>
@@ -799,9 +823,7 @@ export default function SprintsPage() {
                                         <th className="py-2 pr-4">Summary</th>
                                         <th className="py-2 pr-4">Status</th>
                                         <th className="py-2 pr-4">SP</th>
-                                        <th className="py-2 pr-4">Impact</th>
-                                        <th className="py-2 pr-4">Scenarios</th>
-                                        <th className="py-2 pr-4">Bounce</th>
+                                        <th className="py-2 pr-4">Type</th>
                                         <th className="py-2 pr-4">Flags</th>
                                       </tr>
                                     </thead>
@@ -833,45 +855,8 @@ export default function SprintsPage() {
                                           <td className="py-2 pr-4 text-slate-300">
                                             {ticket.storyPoints ?? 0}
                                           </td>
-                                          <td className="py-2 pr-4">
-                                            {(() => {
-                                              const areas = getImpactAreas(ticket)
-                                              if (areas.length === 0) {
-                                                return <span className="text-slate-500 text-xs">--</span>
-                                              }
-                                              return (
-                                                <div className="flex flex-wrap gap-1">
-                                                  {areas.slice(0, 2).map((area, idx) => (
-                                                    <span
-                                                      key={idx}
-                                                      className={`text-xs px-2 py-0.5 rounded ${getImpactColor(area)}`}
-                                                      title={area}
-                                                    >
-                                                      {area.length > 10 ? area.substring(0, 10) + '...' : area}
-                                                    </span>
-                                                  ))}
-                                                  {areas.length > 2 && (
-                                                    <span className="text-xs px-2 py-0.5 rounded bg-slate-700/50 text-slate-300">
-                                                      +{areas.length - 2}
-                                                    </span>
-                                                  )}
-                                                </div>
-                                              )
-                                            })()}
-                                          </td>
-                                          <td className="py-2 pr-4">
-                                            {(() => {
-                                              const count = getScenariosCount(ticket)
-                                              return (
-                                                <div className="flex items-center gap-1">
-                                                  <CheckSquare className="w-3 h-3 text-blue-400" />
-                                                  <span className="text-sm font-semibold text-slate-300">{count}</span>
-                                                </div>
-                                              )
-                                            })()}
-                                          </td>
                                           <td className="py-2 pr-4 text-slate-300">
-                                            {ticket.qaBounceBackCount ?? 0}
+                                            {ticket.issueType || '--'}
                                           </td>
                                           <td className="py-2 pr-4">
                                             {(() => {
@@ -879,9 +864,13 @@ export default function SprintsPage() {
                                               const hours = getTicketAgeHours(ticket)
                                               const isClosed = isClosedStatus(ticket.status || undefined)
                                               const label = isClosed ? 'Closed time' : 'Open time'
+                                              const bounceCount = ticket.qaBounceBackCount ?? 0
                                               const tooltipParts = []
                                               if (carryover > 0) {
                                                 tooltipParts.push(`Carryover: ${carryover}`)
+                                              }
+                                              if (bounceCount > 0) {
+                                                tooltipParts.push(`Bounce: ${bounceCount}`)
                                               }
                                               if (hours != null) {
                                                 tooltipParts.push(`${label}: ${formatHours(hours)}`)
@@ -898,6 +887,11 @@ export default function SprintsPage() {
                                                   {carryover > 0 ? (
                                                     <span className="rounded-md bg-amber-500/20 text-amber-200 px-2 py-0.5">
                                                       CO {carryover}
+                                                    </span>
+                                                  ) : null}
+                                                  {bounceCount > 0 ? (
+                                                    <span className="rounded-md bg-blue-500/20 text-blue-200 px-2 py-0.5">
+                                                      B {bounceCount}
                                                     </span>
                                                   ) : null}
                                                   {hours != null ? (

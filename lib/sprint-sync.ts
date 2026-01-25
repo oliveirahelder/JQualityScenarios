@@ -175,6 +175,7 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
               status: issueNormalized.status,
               assignee: issueNormalized.assignee,
               priority: issueNormalized.priority,
+              issueType: issueNormalized.issueType || null,
               storyPoints: storyPoints ?? null,
               qaBounceBackCount: ticketBounceBacks,
               prCount,
@@ -192,6 +193,7 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
               status: issueNormalized.status,
               assignee: issueNormalized.assignee,
               priority: issueNormalized.priority,
+              issueType: issueNormalized.issueType || null,
               storyPoints: storyPoints ?? null,
               qaBounceBackCount: ticketBounceBacks,
               prCount,
@@ -458,7 +460,9 @@ async function syncSprintIssuesLite(
         if (
           status.includes('ready for release') ||
           status.includes('awaiting approval') ||
-          status.includes('in release')
+          status.includes('in release') ||
+          status.includes('done') ||
+          status.includes('closed')
         ) {
           qaDoneTickets += 1
         }
@@ -547,6 +551,7 @@ async function syncSprintIssuesLite(
         status: issueNormalized.status,
         assignee: issueNormalized.assignee,
         priority: issueNormalized.priority,
+        issueType: issueNormalized.issueType || null,
         storyPoints: storyPoints ?? null,
         qaBounceBackCount: existingTicket?.qaBounceBackCount ?? 0,
         prCount,
@@ -564,6 +569,7 @@ async function syncSprintIssuesLite(
         status: issueNormalized.status,
         assignee: issueNormalized.assignee,
         priority: issueNormalized.priority,
+        issueType: issueNormalized.issueType || null,
         storyPoints: storyPoints ?? null,
         qaBounceBackCount: 0,
         prCount,

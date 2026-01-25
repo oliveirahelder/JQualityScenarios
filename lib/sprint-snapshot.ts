@@ -6,6 +6,8 @@ const QA_DONE_STATUSES = [
   'ready for release',
   'awaiting approval',
   'in release',
+  'done',
+  'closed',
 ]
 const DEV_STATUSES = ['in progress', 'in development', 'in refinement']
 

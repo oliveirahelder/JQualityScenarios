@@ -9,6 +9,8 @@ const QA_READY_STATUSES = [
   'ready for release',
   'awaiting approval',
   'in release',
+  'done',
+  'closed',
 ]
 const QA_ACTIVE_STATUSES = ['in qa']
 const DEV_STATUSES = ['in progress', 'in development', 'in refinement']
@@ -85,6 +87,18 @@ function limitByTeam<T extends { name: string; endDate: Date }>(items: T[], limi
     }
   }
   return Array.from(grouped.values()).flat().sort((a, b) => b.endDate.getTime() - a.endDate.getTime())
+}
+
+function parseSnapshotTotals(value: string | null) {
+  if (!value) return null
+  try {
+    return JSON.parse(value) as {
+      storyPointsTotal?: number
+      storyPointsClosed?: number
+    }
+  } catch {
+    return null
+  }
 }
 
 function isStrictClosed(status?: string | null) {
@@ -498,6 +512,23 @@ export async function GET(request: NextRequest) {
       take: 200,
     })
     const lastSprintSnapshots = limitByTeam(lastSprintSnapshotsRaw, sprintsToSync)
+    const storyPointAveragesByTeam = new Map<
+      string,
+      { total: number; closed: number; sprintCount: number }
+    >()
+    for (const snapshot of lastSprintSnapshots) {
+      const key = getTeamKey(snapshot.name)
+      const totals = parseSnapshotTotals(snapshot.totals)
+      const entry = storyPointAveragesByTeam.get(key) || {
+        total: 0,
+        closed: 0,
+        sprintCount: 0,
+      }
+      entry.total += totals?.storyPointsTotal ?? 0
+      entry.closed += totals?.storyPointsClosed ?? 0
+      entry.sprintCount += 1
+      storyPointAveragesByTeam.set(key, entry)
+    }
 
     const storyPointAverages = new Map<string, { total: number; closed: number; sprintCount: number }>()
     for (const snapshot of lastSprintSnapshots) {
@@ -719,6 +750,45 @@ export async function GET(request: NextRequest) {
       }
     })
 
+    const storyPointsByTeam = activeSprints.map((sprint) => {
+      const teamKey = getTeamKey(sprint.name)
+      const previousForTeam = previousSprintsByTeam.get(teamKey)?.[0] || null
+      const previousStoryPointsTotal = previousForTeam
+        ? previousForTeam.storyPointsTotal > 0
+          ? previousForTeam.storyPointsTotal
+          : previousForTeam.tickets.reduce(
+              (sum: number, ticket: JiraTicketLite) => sum + (ticket.storyPoints || 0),
+              0
+            )
+        : 0
+      const previousStoryPointsClosed = previousForTeam
+        ? previousForTeam.tickets.reduce((sum: number, ticket: JiraTicketLite) => {
+            return sum + (isStrictClosed(ticket.status) ? ticket.storyPoints || 0 : 0)
+          }, 0)
+        : 0
+      const averages = storyPointAveragesByTeam.get(teamKey)
+      return {
+        teamKey,
+        activeSprintId: sprint.id,
+        activeSprintName: sprint.name,
+        activeStoryPointsTotal: sprint.storyPointsTotal,
+        activeStoryPointsClosed: sprint.storyPointsCompleted,
+        previousSprintId: previousForTeam?.id ?? null,
+        previousSprintName: previousForTeam?.name ?? null,
+        previousStoryPointsTotal,
+        previousStoryPointsClosed,
+        averageStoryPointsTotal:
+          averages && averages.sprintCount
+            ? Math.round((averages.total / averages.sprintCount) * 10) / 10
+            : 0,
+        averageStoryPointsClosed:
+          averages && averages.sprintCount
+            ? Math.round((averages.closed / averages.sprintCount) * 10) / 10
+            : 0,
+        averageSprintCount: averages?.sprintCount ?? 0,
+      }
+    })
+
     const responsePayload = {
       activeSprintCount: activeSprintMetrics.length,
       activeSprints: activeSprintMetrics,
@@ -741,6 +811,7 @@ export async function GET(request: NextRequest) {
           }
         : null,
       finishedComparisonByTeam,
+      storyPointsByTeam,
       assignees,
       deliveryTimes: includeDeliveryTimes ? deliveryTimesWithPoints : [],
       deliveryTimesBySprint: includeDeliveryTimes ? deliveryTimesBySprintWithPoints : [],
