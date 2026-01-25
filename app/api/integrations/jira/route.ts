@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      baseUrl: user.jiraBaseUrl || '',
+      baseUrl: user.jiraBaseUrl || process.env.JIRA_BASE_URL || '',
       user: user.jiraUser || '',
       boardIds: user.jiraBoardIds || '',
       sprintFieldId: user.jiraSprintFieldId || '',
@@ -56,6 +56,7 @@ export async function PUT(req: NextRequest) {
     if (!payload) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
     }
+    const isAdmin = ['ADMIN', 'DEVOPS'].includes(payload.role)
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -78,7 +79,7 @@ export async function PUT(req: NextRequest) {
     } = await req.json()
 
     const normalizedBaseUrl =
-      typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : ''
+      typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : undefined
     const normalizedUser = typeof jiraUser === 'string' ? jiraUser.trim() : ''
     const normalizedBoardIds = typeof boardIds === 'string' ? boardIds.trim() : ''
     const normalizedSprintFieldId =
@@ -106,7 +107,6 @@ export async function PUT(req: NextRequest) {
       jiraConnectionStatus?: string | null
       jiraConnectionCheckedAt?: Date | null
     } = {
-      jiraBaseUrl: normalizedBaseUrl || null,
       jiraUser: normalizedUser || null,
       jiraBoardIds: mergedBoardIds || null,
       jiraSprintFieldId: normalizedSprintFieldId || null,
@@ -120,6 +120,10 @@ export async function PUT(req: NextRequest) {
       updateData.jiraRequestTimeout = requestTimeout
     } else {
       updateData.jiraRequestTimeout = null
+    }
+
+    if (typeof normalizedBaseUrl === 'string' && isAdmin) {
+      updateData.jiraBaseUrl = normalizedBaseUrl || null
     }
 
     if (jiraToken) {

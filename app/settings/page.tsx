@@ -138,9 +138,13 @@ export default function SettingsPage() {
     const trimmedToken = jiraToken.trim()
     const trimmedBoardIds = jiraSettings.boardIds.trim()
     const trimmedBoardUrl = jiraBoardUrl.trim()
+    const trimmedUser = jiraSettings.user.trim()
 
-    if (!trimmedBaseUrl) {
-      return 'Jira Base URL is required.'
+    if (isAdmin && !trimmedBaseUrl) {
+      return 'Jira Base URL is required (admin only).'
+    }
+    if (!trimmedUser) {
+      return 'Jira email is required.'
     }
     if (!trimmedToken && !jiraSettings.hasToken) {
       return 'Jira token is required.'
@@ -171,7 +175,7 @@ export default function SettingsPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          baseUrl: jiraSettings.baseUrl,
+          baseUrl: isAdmin ? jiraSettings.baseUrl : undefined,
           user: jiraSettings.user,
           boardIds: jiraSettings.boardIds,
           boardUrl: jiraBoardUrl,
@@ -244,8 +248,8 @@ export default function SettingsPage() {
     const trimmedBaseUrl = confluenceSettings.baseUrl.trim()
     const trimmedToken = confluenceToken.trim()
 
-    if (!trimmedBaseUrl) {
-      return 'Confluence Base URL is required.'
+    if (isAdmin && !trimmedBaseUrl) {
+      return 'Confluence Base URL is required (admin only).'
     }
     if (!trimmedToken && !confluenceSettings.hasToken) {
       return 'Confluence token is required.'
@@ -273,7 +277,7 @@ export default function SettingsPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          baseUrl: confluenceSettings.baseUrl,
+          baseUrl: isAdmin ? confluenceSettings.baseUrl : undefined,
           token: confluenceToken.trim() || undefined,
         }),
       })
@@ -459,10 +463,24 @@ export default function SettingsPage() {
                     {showJiraConfig && (
                       <form onSubmit={handleJiraConnect} className="space-y-3 mt-4">
                         <Input
-                          placeholder="Jira Base URL"
+                          placeholder="Jira Base URL (admin only)"
                           value={jiraSettings.baseUrl}
                           onChange={(e) =>
                             setJiraSettings({ ...jiraSettings, baseUrl: e.target.value })
+                          }
+                          disabled={!isAdmin}
+                          className="bg-slate-800/50 border-slate-700 disabled:opacity-60"
+                        />
+                        {!isAdmin ? (
+                          <div className="text-xs text-slate-400">
+                            Jira Base URL is shared for all users.
+                          </div>
+                        ) : null}
+                        <Input
+                          placeholder="Jira email"
+                          value={jiraSettings.user}
+                          onChange={(e) =>
+                            setJiraSettings({ ...jiraSettings, user: e.target.value })
                           }
                           className="bg-slate-800/50 border-slate-700"
                         />
@@ -554,13 +572,19 @@ export default function SettingsPage() {
                     {showConfluenceConfig && (
                       <form onSubmit={handleConfluenceConnect} className="space-y-3 mt-4">
                         <Input
-                          placeholder="Confluence Base URL"
+                          placeholder="Confluence Base URL (admin only)"
                           value={confluenceSettings.baseUrl}
                           onChange={(e) =>
                             setConfluenceSettings({ ...confluenceSettings, baseUrl: e.target.value })
                           }
-                          className="bg-slate-800/50 border-slate-700"
+                          disabled={!isAdmin}
+                          className="bg-slate-800/50 border-slate-700 disabled:opacity-60"
                         />
+                        {!isAdmin ? (
+                          <div className="text-xs text-slate-400">
+                            Confluence Base URL is shared for all users.
+                          </div>
+                        ) : null}
                         <Input
                           type="password"
                           placeholder={

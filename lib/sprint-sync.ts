@@ -14,7 +14,36 @@ import type { JiraIssue, JiraSprintEvent } from '@/lib/jira-sprints'
 import type { JiraCredentials } from '@/lib/jira-config'
 import { ensureSprintSnapshot } from '@/lib/sprint-snapshot'
 
-const CLOSED_CUTOFF_DATE = new Date(Date.UTC(2025, 11, 1))
+const CLOSED_CUTOFF_DATE = new Date(Date.UTC(2025, 0, 1))
+const CLOSED_SPRINTS_PER_TEAM_LIMIT = 10
+
+function getTeamKey(name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return 'TEAM'
+  const match = trimmed.match(/^[A-Za-z0-9]+/)
+  return match ? match[0].toUpperCase() : trimmed.toUpperCase()
+}
+
+function limitClosedSprintsByTeam(
+  sprints: JiraSprintEvent[],
+  limit: number
+): JiraSprintEvent[] {
+  const sorted = [...sprints].sort(
+    (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
+  )
+  const grouped = new Map<string, JiraSprintEvent[]>()
+
+  for (const sprint of sorted) {
+    const key = getTeamKey(sprint.name)
+    const list = grouped.get(key) || []
+    if (list.length < limit) {
+      list.push(sprint)
+      grouped.set(key, list)
+    }
+  }
+
+  return Array.from(grouped.values()).flat()
+}
 
 type JiraSprintReportIssue = {
   estimateStatistic?: { statFieldValue?: { value?: number | string | null } }
@@ -186,8 +215,19 @@ export async function syncRecentClosedSprints(credentials?: JiraCredentials) {
 
     const closedSprints = await getRecentClosedSprints(credentials)
     const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
+    const limitedClosedSprints = limitClosedSprintsByTeam(
+      closedSprints
+        .filter((sprint) => {
+          const endDate = getSprintEndDate(sprint)
+          return endDate && endDate >= CLOSED_CUTOFF_DATE
+        })
+        .sort(
+          (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
+        ),
+      CLOSED_SPRINTS_PER_TEAM_LIMIT
+    )
 
-    for (const jiraSprint of closedSprints) {
+    for (const jiraSprint of limitedClosedSprints) {
       const endDate = getSprintEndDate(jiraSprint)
       if (!endDate || endDate < CLOSED_CUTOFF_DATE) {
         continue
@@ -218,7 +258,7 @@ export async function syncRecentClosedSprints(credentials?: JiraCredentials) {
     }
 
     console.log('[Sprint Sync] Recently closed sprints sync completed')
-    return { success: true, closedSprintCount: closedSprints.length }
+    return { success: true, closedSprintCount: limitedClosedSprints.length }
   } catch (error) {
     console.error('[Sprint Sync] Error syncing closed sprints:', error)
     throw error
@@ -235,20 +275,24 @@ export async function syncAllClosedSprints(credentials?: JiraCredentials) {
 
     const closedSprints = await getAllClosedSprints(credentials)
     const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
-    const limitedClosedSprints = closedSprints
-      .filter((sprint) => {
-        const endDate = getSprintEndDate(sprint)
-        return endDate && endDate >= CLOSED_CUTOFF_DATE
-      })
-      .sort((a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime())
-      .slice(0, 10)
+    const limitedClosedSprints = limitClosedSprintsByTeam(
+      closedSprints
+        .filter((sprint) => {
+          const endDate = getSprintEndDate(sprint)
+          return endDate && endDate >= CLOSED_CUTOFF_DATE
+        })
+        .sort(
+          (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
+        ),
+      CLOSED_SPRINTS_PER_TEAM_LIMIT
+    )
     const keepJiraIds = new Set(limitedClosedSprints.map((sprint) => sprint.id.toString()))
 
     await prisma.sprint.deleteMany({
       where: {
         status: { in: ['COMPLETED', 'CLOSED'] },
         jiraId: { notIn: Array.from(keepJiraIds) },
-        endDate: { lt: CLOSED_CUTOFF_DATE },
+        endDate: { gte: CLOSED_CUTOFF_DATE },
       },
     })
 

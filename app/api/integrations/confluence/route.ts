@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
-      baseUrl: user.confluenceBaseUrl || '',
+      baseUrl: user.confluenceBaseUrl || process.env.CONFLUENCE_BASE_URL || '',
       hasToken: Boolean(user.confluenceApiToken),
       connectionStatus: user.confluenceConnectionStatus || '',
       connectionCheckedAt: user.confluenceConnectionCheckedAt?.toISOString() || '',
@@ -48,6 +48,7 @@ export async function PUT(req: NextRequest) {
     if (!payload) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
     }
+    const isAdmin = ['ADMIN', 'DEVOPS'].includes(payload.role)
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -60,7 +61,7 @@ export async function PUT(req: NextRequest) {
     const { baseUrl, token: confluenceToken } = await req.json()
 
     const normalizedBaseUrl =
-      typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : ''
+      typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : undefined
 
     const updateData: {
       confluenceBaseUrl?: string | null
@@ -70,11 +71,14 @@ export async function PUT(req: NextRequest) {
       confluenceConnectionStatus?: string | null
       confluenceConnectionCheckedAt?: Date | null
     } = {
-      confluenceBaseUrl: normalizedBaseUrl || null,
       confluenceAuthType: 'bearer',
       confluenceDeployment: 'datacenter',
       confluenceConnectionStatus: null,
       confluenceConnectionCheckedAt: null,
+    }
+
+    if (typeof normalizedBaseUrl === 'string' && isAdmin) {
+      updateData.confluenceBaseUrl = normalizedBaseUrl || null
     }
 
     if (confluenceToken) {
