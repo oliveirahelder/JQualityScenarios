@@ -1,102 +1,335 @@
-# 🔌 API Routes - Documentação Técnica
+# API Routes Reference
 
-**Para developers que querem integrar com JQuality ou entender os endpoints.**
-
----
-
-## 📋 Índice de Rotas
-
-### Autenticação
-- [POST /api/auth/login](#post-apiauthlogin)
-- [POST /api/auth/register](#post-apiauthregister)
-
-### Sprints
-- [GET /api/sprints](#get-apisprints)
-- [GET /api/sprints/[sprintId]](#get-apisprinstsid)
-- [POST /api/admin/sprints/sync](#post-apiadminsprintssync)
-
-### Scenarios (Testes)
-- [GET /api/scenarios](#get-apiscenarios)
-- [POST /api/scenarios/generate](#post-apiscenariosgenerae)
-- [POST /api/scenarios/save](#post-apiscenariossave)
-
-### Documentação
-- [GET /api/documentation-drafts](#get-apidocumentation-drafts)
-- [GET /api/documentation-drafts/[draftId]](#get-apidocumentation-draftsdraftid)
-
-### Busca
-- [POST /api/search](#post-apisearch)
-
-### Webhooks
-- [POST /api/webhooks/jira](#post-apiwebhooksjira)
-- [POST /api/webhooks/github](#post-apiwebhooksgithub)
-
-### Sistema
-- [GET /api/system/database-status](#get-apisystemdatabase-status)
+All routes require `Authorization: Bearer {token}` header except for `/auth/login` and `/auth/register`.
 
 ---
 
-## 🔐 Autenticação
-
-Todas as rotas (exceto login/register) requerem:
-```bash
-Authorization: Bearer {jwt_token}
-```
-
-**Roles**: `ADMIN`, `QA`, `DEVELOPER`, `DEVOPS`
-
----
-
-## 📍 Rotas Detalhadas
+## Authentication
 
 ### POST /api/auth/login
 
-**Faz login de um utilizador.**
+Login user.
 
-**Request**:
 ```bash
-POST http://localhost:3000/api/auth/login
-Content-Type: application/json
-
-{
-  "username": "admin",
-  "password": "123456"
-}
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin",
+    "password": "password123"
+  }'
 ```
 
-**Response** (200 OK):
+**Response**:
 ```json
 {
   "user": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "id": "uuid",
     "username": "admin",
     "role": "ADMIN",
     "createdAt": "2026-01-15T10:00:00Z"
   },
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI1NTBlODQwMC1lMjliLTQxZDQtYTcxNi00NDY2NTU0NDAwMDAiLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE3MzYzMzAwMDAsImV4cCI6MTczNjkzNDgwMH0.SIGNATURE"
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
-
-**Errors**:
-- `401 Unauthorized`: Credenciais inválidas
-- `400 Bad Request`: Username/password não fornecidos
 
 ---
 
 ### POST /api/auth/register
 
-**Cria uma nova conta.**
+Register new user.
 
-**Request**:
 ```bash
-POST http://localhost:3000/api/auth/register
-Content-Type: application/json
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "john",
+    "password": "secure-password"
+  }'
+```
 
+---
+
+## Sprints
+
+### GET /api/sprints
+
+List all sprints.
+
+```bash
+curl -H "Authorization: Bearer {token}" \
+  http://localhost:3000/api/sprints
+```
+
+**Response**:
+```json
 {
-  "username": "joao.silva",
-  "password": "minha-password-segura"
+  "sprints": [
+    {
+      "id": "uuid",
+      "name": "Sprint 1 - Payment",
+      "status": "ACTIVE",
+      "startDate": "2026-01-15",
+      "endDate": "2026-01-29",
+      "ticketCount": 4,
+      "completedCount": 2,
+      "tickets": [...]
+    }
+  ]
 }
 ```
+
+---
+
+### GET /api/sprints/{sprintId}
+
+Get sprint details.
+
+```bash
+curl -H "Authorization: Bearer {token}" \
+  http://localhost:3000/api/sprints/uuid
+```
+
+---
+
+### POST /api/admin/sprints/sync
+
+Sync sprints from Jira. (Admin only)
+
+```bash
+curl -X POST http://localhost:3000/api/admin/sprints/sync \
+  -H "Authorization: Bearer {token}"
+```
+
+---
+
+## Test Scenarios
+
+### GET /api/scenarios
+
+List all test scenarios.
+
+```bash
+curl -H "Authorization: Bearer {token}" \
+  http://localhost:3000/api/scenarios
+```
+
+---
+
+### POST /api/scenarios/generate
+
+Generate scenarios for a ticket.
+
+```bash
+curl -X POST http://localhost:3000/api/scenarios/generate \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ticketId": "JX-123"
+  }'
+```
+
+**Response**:
+```json
+{
+  "scenarios": [
+    {
+      "id": "uuid",
+      "title": "Login with OAuth2",
+      "type": "HAPPY_PATH",
+      "gherkin": "Given I am on login page\nWhen I click Login\nThen I see dashboard"
+    }
+  ]
+}
+```
+
+---
+
+### POST /api/scenarios/save
+
+Save generated scenarios.
+
+```bash
+curl -X POST http://localhost:3000/api/scenarios/save \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scenarioIds": ["uuid1", "uuid2"]
+  }'
+```
+
+---
+
+## Documentation
+
+### GET /api/documentation-drafts
+
+List documentation drafts.
+
+```bash
+curl -H "Authorization: Bearer {token}" \
+  http://localhost:3000/api/documentation-drafts
+```
+
+**Response**:
+```json
+{
+  "drafts": [
+    {
+      "id": "uuid",
+      "title": "OAuth2 Feature",
+      "status": "DRAFT",
+      "ticketId": "JX-123",
+      "createdAt": "2026-01-20T10:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/documentation-drafts/{draftId}
+
+Get draft details.
+
+```bash
+curl -H "Authorization: Bearer {token}" \
+  http://localhost:3000/api/documentation-drafts/uuid
+```
+
+---
+
+## Search
+
+### POST /api/search
+
+Semantic search for tickets and documentation.
+
+```bash
+curl -X POST http://localhost:3000/api/search \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "How to set up OAuth?",
+    "type": "tickets"
+  }'
+```
+
+**Response**:
+```json
+{
+  "results": [
+    {
+      "id": "JX-123",
+      "title": "Implement OAuth2",
+      "relevance": 0.95
+    }
+  ]
+}
+```
+
+---
+
+## Tickets
+
+### GET /api/tickets
+
+List all tickets.
+
+```bash
+curl -H "Authorization: Bearer {token}" \
+  http://localhost:3000/api/tickets
+```
+
+---
+
+### GET /api/tickets/{ticketId}
+
+Get ticket details.
+
+```bash
+curl -H "Authorization: Bearer {token}" \
+  http://localhost:3000/api/tickets/JX-123
+```
+
+---
+
+## System
+
+### GET /api/system/database-status
+
+Check database connection status.
+
+```bash
+curl -H "Authorization: Bearer {token}" \
+  http://localhost:3000/api/system/database-status
+```
+
+**Response**:
+```json
+{
+  "status": "connected",
+  "timestamp": "2026-01-20T14:30:00Z"
+}
+```
+
+---
+
+## Webhooks
+
+### POST /api/webhooks/jira
+
+Jira webhook endpoint. (No auth required)
+
+```bash
+curl -X POST http://localhost:3000/api/webhooks/jira \
+  -H "Content-Type: application/json" \
+  -d '{"event": "issue_updated", ...}'
+```
+
+---
+
+### POST /api/webhooks/github
+
+GitHub webhook endpoint. (No auth required)
+
+```bash
+curl -X POST http://localhost:3000/api/webhooks/github \
+  -H "Content-Type: application/json" \
+  -d '{"action": "opened", "pull_request": {...}}'
+```
+
+---
+
+## Error Codes
+
+| Code | Message | Solution |
+|------|---------|----------|
+| 401 | Unauthorized | Missing or invalid token |
+| 403 | Forbidden | Insufficient permissions |
+| 404 | Not Found | Resource doesn't exist |
+| 400 | Bad Request | Invalid request body |
+| 500 | Server Error | Check logs |
+
+---
+
+## Authentication
+
+**Get token**:
+```bash
+POST /api/auth/login
+{username, password} → returns {token}
+```
+
+**Use token**:
+```bash
+Header: Authorization: Bearer {token}
+```
+
+**Token expiry**: 7 days
+
+---
+
+See [QUICK_REFERENCE.md](QUICK_REFERENCE.md) for common commands.
 
 **Response** (201 Created):
 ```json

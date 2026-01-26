@@ -1,53 +1,114 @@
-# JQuality - Centralized Intelligence Platform
+# JQuality - Test Automation & Documentation Platform
 
-A sophisticated platform that connects Jira, GitHub, and Confluence to automate test scenario generation, audit technical impacts in real-time, and publish validated "As-Built" documentation with full traceability.
+**Automate test scenario generation and documentation from Jira, GitHub, and Confluence.**
 
-## 🎯 Project Vision
+---
 
-JQuality anticipates test scenarios from Sprint creation, analyzes developer code changes, executes functional tests only after Staging deployment, and maintains human-reviewed documentation—ensuring 100% traceability from Sprint creation to final publication.
+## What is JQuality?
 
-## 🏗️ Architecture
+JQuality automatically generates BDD test scenarios and documentation when developers create Jira tickets and open GitHub PRs. Instead of QA teams writing tests manually after development, JQuality creates them in real-time with full code traceability.
 
-- **Frontend**: Next.js 14 (App Router) + Tailwind CSS + ShadcnUI
-- **Backend**: Next.js API Routes (Node.js)
-- **Database**: PostgreSQL with Prisma ORM
-- **AI Engine**: Gemini Pro API (semantic analysis) + OpenAI (scenario generation)
-- **Integrations**: Jira API, GitHub API, Confluence API, CI/CD Webhooks
+### The Problem
+- ❌ QA teams write tests manually (slow, error-prone)
+- ❌ Context is lost after development
+- ❌ Documentation gets outdated
+- ❌ No traceability between code and tests
 
-## 📋 Data Model
+### The Solution
+- ✅ Automatic test generation from Jira tickets
+- ✅ Code impact analysis from GitHub PRs
+- ✅ BDD/Gherkin test scenarios
+- ✅ Auto-published documentation to Confluence
+- ✅ **100% traceability**: ticket → code → test → docs
 
-- **Sprint**: Tracks Sprint creation with start/end dates and associated tickets
-- **Ticket**: Jira ticket representation with Gross Time calculation
-- **DevInsight**: Developer PR notes + AI-analyzed code diffs
-- **TestScenario**: BDD/Gherkin scenarios with traceability
-- **DocumentationDraft**: AI-generated content awaiting QA review
-- **Deployment**: CI/CD deployment tracking for Staging/Production
+---
 
-## 🚀 Quick Start
+## Architecture
+
+| Component | Technology |
+|-----------|-----------|
+| Frontend | Next.js 14 + Tailwind CSS |
+| Backend | Node.js API Routes |
+| Database | PostgreSQL + Prisma ORM |
+| AI Engine | OpenAI (scenarios) + Gemini Pro (search) |
+| Integrations | Jira, GitHub, Confluence APIs |
+
+---
+
+## Core Features
+
+### 1. Sprint Management
+- Real-time sync from Jira
+- Track ticket progress
+- Code impact analysis
+- Test scenario count
+
+### 2. Automatic Test Generation
+- BDD/Gherkin scenarios
+- Happy path + edge cases
+- Error handling scenarios
+
+### 3. Code Impact Analysis
+- Detects changed components
+- Risk level classification
+- File-by-file tracking
+
+### 4. Documentation Pipeline
+- Auto-generate drafts
+- QA review workflow
+- Publish to Confluence
+
+### 5. Historical Search
+- Semantic search across tickets
+- Find related documentation
+
+---
+
+## Quick Start
 
 ### Prerequisites
 - Node.js 18+
 - PostgreSQL 14+
-- API keys: Jira, GitHub, Confluence, OpenAI, Gemini Pro
+- API keys: Jira, GitHub, OpenAI, Gemini
 
 ### Installation
-
 ```bash
-# Install dependencies
+cd JQualityScenarios
 npm install
-
-# Setup environment
 cp .env.example .env.local
-# Edit .env.local with your credentials
-
-# Setup database
-npx prisma migrate dev --name init
-
-# Start development server
+# Edit .env.local with API keys
+npx prisma migrate dev
 npm run dev
 ```
 
-Visit `http://localhost:3000` to access the platform.
+Visit `http://localhost:3000`
+
+---
+
+## Getting Started
+
+1. **Install**: [SETUP.md](SETUP.md) (20 minutes)
+2. **Overview**: [QUICK_START.md](QUICK_START.md) (5 minutes)
+3. **Features**: [FEATURES.md](FEATURES.md) (15 minutes)
+4. **APIs**: [API_ROUTES.md](API_ROUTES.md) (20 minutes)
+5. **Issues**: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+
+---
+
+## User Roles
+
+| Role | Permissions |
+|------|-----------|
+| **QA** | Generate/edit/publish scenarios & docs |
+| **Developer** | View-only access |
+| **DevOps** | Manage webhooks and sync |
+| **Admin** | Full system access |
+
+---
+
+## License
+
+Proprietary - JQuality Platform 2026
 
 ## 📚 API Routes (Phase 1)
 

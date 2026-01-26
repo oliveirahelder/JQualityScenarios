@@ -1,53 +1,159 @@
-# QABOT Platform Setup Guide
+# Setup Guide - JQuality
 
-## Phase 1 Implementation Complete
+**Complete installation in 30 minutes.**
 
-This guide covers setting up the QABOT platform after Phase 1 (Foundation & Database Migration) is complete.
+---
 
 ## Prerequisites
 
-- Node.js 18+ ([download](https://nodejs.org/))
-- PostgreSQL 14+ ([download](https://www.postgresql.org/) or use Docker)
-- Git
-- API Keys (instructions below)
+- **Node.js 18+** - [Download](https://nodejs.org/)
+- **PostgreSQL 14+** - [Download](https://www.postgresql.org/) or Docker
+- **Git** - [Download](https://git-scm.com/)
+- API keys: Jira, GitHub, OpenAI, Gemini
 
-## Step 1: Clone & Install Dependencies
+---
+
+## Step 1: Install Dependencies
 
 ```bash
-# Navigate to the project directory
-cd c:\Users\helder.oliveira\Desktop\QABOT\JQualityScenarios
-
-# Install all dependencies
+cd JQualityScenarios
 npm install
 ```
 
-## Step 2: Database Setup
+Expected: `added XXX packages` (2-3 minutes)
 
-### Option A: Local PostgreSQL
+---
 
-1. **Install PostgreSQL** (if not already installed)
-   - Windows: Use installer from postgresql.org
-   - Docker: `docker run --name qabot-db -e POSTGRES_PASSWORD=password -p 5432:5432 -d postgres:14`
+## Step 2: Setup Database
 
-2. **Create Database**
-   ```bash
-   psql -U postgres
-   CREATE DATABASE qabot_dev;
-   \q
-   ```
+### Option A: PostgreSQL Local
 
-3. **Update .env.local**
-   ```
-   DATABASE_URL="postgresql://postgres:password@localhost:5432/qabot_dev"
-   ```
+```bash
+net start postgresql-x64-14
+psql -U postgres
+CREATE DATABASE qabot_dev;
+\q
+```
 
-### Option B: Managed Database (Recommended for Production)
+### Option B: Docker
 
-- **Neon**: https://neon.tech/
-- **AWS RDS**: https://aws.amazon.com/rds/
-- **Supabase**: https://supabase.com/
+```bash
+docker run --name qabot-db \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_DB=qabot_dev \
+  -p 5432:5432 \
+  -d postgres:14
+```
 
-Update `DATABASE_URL` in `.env.local` with your managed database connection string.
+### Option C: Cloud (Neon, Supabase, AWS RDS)
+
+Sign up and get connection string.
+
+---
+
+## Step 3: Configure Environment
+
+```bash
+cp .env.example .env.local
+```
+
+Edit `.env.local`:
+
+```bash
+# Database
+DATABASE_URL="postgresql://postgres:password@localhost:5432/qabot_dev"
+
+# Jira
+JIRA_BASE_URL="https://your-domain.atlassian.net"
+JIRA_USER="your-email@company.com"
+JIRA_API_TOKEN="your-token"
+
+# GitHub
+GITHUB_TOKEN="ghp_xxxxx"
+
+# Confluence
+CONFLUENCE_BASE_URL="https://your-domain.atlassian.net/wiki"
+CONFLUENCE_USER="your-email@company.com"
+CONFLUENCE_API_TOKEN="your-token"
+
+# AI
+OPENAI_API_KEY="sk-proj-xxxxx"
+GEMINI_API_KEY="AIzaSyxxxxx"
+
+# Auth
+JWT_SECRET="your-secret-min-32-chars"
+JWT_EXPIRES_IN="7d"
+NEXT_PUBLIC_API_URL="http://localhost:3000"
+NODE_ENV="development"
+```
+
+---
+
+## Step 4: Get API Keys
+
+### Jira
+1. https://id.atlassian.com/manage-profile/security/api-tokens
+2. Create API token
+3. Copy to `.env.local`
+
+### GitHub
+1. https://github.com/settings/tokens
+2. Create token (classic)
+3. Scopes: `repo`, `read:org`
+
+### OpenAI
+1. https://platform.openai.com/api-keys
+2. Create secret key
+
+### Gemini
+1. https://makersuite.google.com/app/apikey
+2. Create API key
+
+---
+
+## Step 5: Initialize Database
+
+```bash
+npx prisma migrate dev --name init
+```
+
+---
+
+## Step 6: Start Server
+
+```bash
+npm run dev
+```
+
+Expected: Opens http://localhost:3000
+
+---
+
+## Step 7: Verify Setup
+
+1. Open http://localhost:3000
+2. Sign up
+3. Login
+4. Go to Sprints → Sync from Jira
+5. Should see your sprints ✅
+
+---
+
+## Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Database connection refused | Start PostgreSQL or Docker |
+| Invalid API token | Regenerate on provider website |
+| Port 3000 in use | `npm run dev -- -p 3001` |
+| Module not found | `rm -r node_modules && npm install` |
+
+See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for more.
+
+---
+
+**Next: [QUICK_START.md](QUICK_START.md)**
 
 ## Step 3: Environment Configuration
 
