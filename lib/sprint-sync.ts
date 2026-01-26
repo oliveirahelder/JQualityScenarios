@@ -101,6 +101,7 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
           name: normalized.name,
           startDate: normalized.startDate,
           endDate: normalized.endDate,
+          completedAt: normalized.completedAt,
           status: 'ACTIVE',
         },
         create: {
@@ -108,6 +109,7 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
           name: normalized.name,
           startDate: normalized.startDate,
           endDate: normalized.endDate,
+          completedAt: normalized.completedAt,
           status: 'ACTIVE',
         },
       })
@@ -278,12 +280,16 @@ export async function syncRecentClosedSprints(credentials?: JiraCredentials) {
 
       const sprint = await prisma.sprint.upsert({
         where: { jiraId: normalized.jiraId },
-        update: { status: 'COMPLETED' },
+        update: {
+          status: 'COMPLETED',
+          completedAt: normalized.completedAt,
+        },
         create: {
           jiraId: normalized.jiraId,
           name: normalized.name,
           startDate: normalized.startDate,
           endDate: normalized.endDate,
+          completedAt: normalized.completedAt,
           status: 'COMPLETED',
         },
       })
@@ -345,12 +351,16 @@ export async function syncAllClosedSprints(credentials?: JiraCredentials) {
 
       const sprint = await prisma.sprint.upsert({
         where: { jiraId: normalized.jiraId },
-        update: { status: 'COMPLETED' },
+        update: {
+          status: 'COMPLETED',
+          completedAt: normalized.completedAt,
+        },
         create: {
           jiraId: normalized.jiraId,
           name: normalized.name,
           startDate: normalized.startDate,
           endDate: normalized.endDate,
+          completedAt: normalized.completedAt,
           status: 'COMPLETED',
         },
       })

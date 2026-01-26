@@ -120,6 +120,7 @@ export interface JiraSprintEvent {
   state: 'FUTURE' | 'ACTIVE' | 'CLOSED'
   startDate?: string
   endDate?: string
+  completeDate?: string
   boardId: number
 }
 
@@ -178,6 +179,7 @@ type JiraSprintEventRaw = {
   status?: string
   startDate?: string
   endDate?: string
+  completeDate?: string
   originBoardId?: number
   boardId?: number
 }
@@ -675,6 +677,7 @@ async function getClosedSprintsFromGreenhopper(
         state: 'CLOSED',
         startDate: sprint.startDate || undefined,
         endDate: sprint.endDate || undefined,
+        completeDate: sprint.completeDate || undefined,
         boardId,
       }))
   } catch (error) {
@@ -737,6 +740,7 @@ export function normalizeSprint(jiraSprint: JiraSprintEvent) {
     name: jiraSprint.name,
     startDate: jiraSprint.startDate ? new Date(jiraSprint.startDate) : new Date(),
     endDate: jiraSprint.endDate ? new Date(jiraSprint.endDate) : new Date(),
+    completedAt: jiraSprint.completeDate ? new Date(jiraSprint.completeDate) : null,
     status: statusMap[jiraSprint.state] || 'PLANNED',
   }
 }

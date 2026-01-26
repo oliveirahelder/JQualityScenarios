@@ -72,6 +72,7 @@ model Sprint {
   name      String
   startDate DateTime
   endDate   DateTime
+  completedAt DateTime?
   status    String     @default("ACTIVE")
   totalTickets Int     @default(0)
   closedTickets Int    @default(0)

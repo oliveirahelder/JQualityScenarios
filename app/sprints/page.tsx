@@ -49,6 +49,7 @@ export default function SprintsPage() {
     status: string
     startDate: string | Date
     endDate: string | Date
+    completedAt?: string | Date | null
     totalTickets?: number | null
     closedTickets?: number | null
     storyPointsTotal?: number | null
@@ -139,13 +140,85 @@ export default function SprintsPage() {
     return Number.isInteger(value) ? value.toString() : value.toFixed(1)
   }
 
-  const getDaysRemaining = (endDate: string | Date) => {
+  const countWorkingHours = (startDate: Date, endDate: Date) => {
+    const start = new Date(startDate)
     const end = new Date(endDate)
-    if (Number.isNaN(end.getTime())) return '--'
-    const now = new Date()
-    const diffMs = end.getTime() - now.getTime()
-    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
-    return diffDays.toString()
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0
+    if (end <= start) return 0
+    const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate())
+    const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate())
+    let hours = 0
+    while (cursor <= endDay) {
+      const day = cursor.getDay()
+      if (day !== 0 && day !== 6) {
+        const dayStart = new Date(cursor)
+        const dayEnd = new Date(cursor)
+        dayEnd.setDate(dayEnd.getDate() + 1)
+        const windowStart = start > dayStart ? start : dayStart
+        const windowEnd = end < dayEnd ? end : dayEnd
+        const diff = windowEnd.getTime() - windowStart.getTime()
+        if (diff > 0) {
+          hours += diff / (1000 * 60 * 60)
+        }
+      }
+      cursor.setDate(cursor.getDate() + 1)
+    }
+    return hours
+  }
+
+  const formatDaysHours = (hours: number) => {
+    if (!Number.isFinite(hours)) return '--'
+    const sign = hours < 0 ? '-' : ''
+    const absHours = Math.abs(hours)
+    const days = Math.floor(absHours / 24)
+    const remainder = absHours - days * 24
+    const hoursLabel = Number.isInteger(remainder)
+      ? remainder.toString()
+      : (Math.round(remainder * 10) / 10).toString()
+    if (days === 0) return `${sign}${hoursLabel}h`
+    if (remainder === 0) return `${sign}${days}d`
+    return `${sign}${days}d ${hoursLabel}h`
+  }
+
+  const getWorkingHours = (startDate: Date, endDate: Date) =>
+    countWorkingHours(startDate, endDate)
+
+  const getSprintPlannedHours = (sprint: SprintItem) => {
+    const start = new Date(sprint.startDate)
+    const end = new Date(sprint.endDate)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null
+    return getWorkingHours(start, end)
+  }
+
+  const getSprintElapsedHours = (sprint: SprintItem, referenceDate: Date) => {
+    const start = new Date(sprint.startDate)
+    if (Number.isNaN(start.getTime())) return null
+    return getWorkingHours(start, referenceDate)
+  }
+
+  const getSprintWorkingDaysDisplay = (sprint: SprintItem) => {
+    const plannedHours = getSprintPlannedHours(sprint)
+    return plannedHours == null ? '--' : formatDaysHours(plannedHours)
+  }
+
+  const getSprintRemainingDaysDisplay = (sprint: SprintItem) => {
+    const plannedHours = getSprintPlannedHours(sprint)
+    if (plannedHours == null) return '--'
+    const reference =
+      sprint.status === 'COMPLETED' || sprint.status === 'CLOSED'
+        ? new Date(sprint.completedAt || sprint.endDate)
+        : new Date()
+    const elapsedHours = getSprintElapsedHours(sprint, reference)
+    if (elapsedHours == null) return '--'
+    const remaining = plannedHours - elapsedHours
+    return formatDaysHours(remaining)
+  }
+
+  const getSprintActualDurationDisplay = (sprint: SprintItem) => {
+    if (!(sprint.status === 'COMPLETED' || sprint.status === 'CLOSED')) return null
+    const end = new Date(sprint.completedAt || sprint.endDate)
+    const elapsedHours = getSprintElapsedHours(sprint, end)
+    return elapsedHours == null ? '--' : formatDaysHours(elapsedHours)
   }
 
   const getLastSyncTime = (lastSyncedAt: Date | string | undefined) => {
@@ -964,10 +1037,26 @@ export default function SprintsPage() {
                           })()}
                         </div>
                         <div>
-                          <div className="text-slate-500 text-xs mb-1">Days Left</div>
+                          <div className="text-slate-500 text-xs mb-1">Sprint Days</div>
                           <div className="text-xl font-bold text-white">
-                            {getDaysRemaining(sprint.endDate)}
+                            {getSprintWorkingDaysDisplay(sprint)}
                           </div>
+                          {(() => {
+                            if (sprint.status === 'COMPLETED' || sprint.status === 'CLOSED') {
+                              const actualDuration = getSprintActualDurationDisplay(sprint)
+                              return (
+                                <div className="text-xs text-slate-400 mt-1">
+                                  Duration: {actualDuration ?? '--'}
+                                </div>
+                              )
+                            }
+                            const remainingDays = getSprintRemainingDaysDisplay(sprint)
+                            return (
+                              <div className="text-xs text-slate-400 mt-1">
+                                Remaining: {remainingDays ?? '--'}
+                              </div>
+                            )
+                          })()}
                         </div>
                       </div>
 
