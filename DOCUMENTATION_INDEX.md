@@ -1,30 +1,82 @@
-# 📚 Documentation Index - Sprint View Enhancements
+# 📚 Índice de Documentação - JQuality
 
-## Quick Links
-
-| Document | Purpose | Audience | Time |
-|----------|---------|----------|------|
-| [QUICK_START_FEATURES.md](QUICK_START_FEATURES.md) | 30-second feature overview | Everyone | 5 min |
-| [FEATURES_OVERVIEW.md](FEATURES_OVERVIEW.md) | Visual guide & examples | Product, QA, Developers | 15 min |
-| [TESTING_GUIDE.md](TESTING_GUIDE.md) | Step-by-step testing | QA Engineers | 2-4 hrs |
-| [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) | Feature breakdown | Developers, Tech Leads | 20 min |
-| [CHANGELOG.md](CHANGELOG.md) | Exact code changes | Developers | 30 min |
-| [IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md) | Project summary | Managers, Leads | 10 min |
+**Bem-vindo! Escolhe teu perfil abaixo para encontrar os documentos certos.**
 
 ---
 
-## 📖 Reading by Role
+## 🎯 Começar por Perfil
 
-### 👨‍🔬 QA Engineer
-**Start here**: 
-1. QUICK_START_FEATURES.md (5 min) - Learn what's new
-2. FEATURES_OVERVIEW.md (15 min) - See examples
-3. TESTING_GUIDE.md (2-4 hrs) - Test the features
+### 👤 QA / Tester
+Queres gerar testes e publicar documentação.
 
-**Key Sections**:
-- Feature 3: Test Scenario Coverage
-- Feature 2: Code Impact Analysis
-- Feature 4: Documentation Pipeline
+**Lê nesta ordem**:
+1. [LEIA-ME.md](LEIA-ME.md) - Entender (5 min) ⭐
+2. [FEATURES.md](FEATURES.md) - Features (15 min) ⭐
+3. [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - Referência (5 min)
+
+### 👨‍💻 Developer
+Queres entender, instalar e contribuir.
+
+**Lê nesta ordem**:
+1. [SETUP_PT.md](SETUP_PT.md) - Instalação (20 min) ⭐⭐
+2. [LEIA-ME.md](LEIA-ME.md) - Visão geral (10 min)
+3. [API_ROUTES.md](API_ROUTES.md) - APIs (20 min) ⭐
+4. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Debug
+
+### 🚀 DevOps / Admin
+Queres deploy, integrações e gestão.
+
+**Lê nesta ordem**:
+1. [SETUP_PT.md](SETUP_PT.md) - Instalação (20 min) ⭐⭐
+2. [QUICK_REFERENCE.md](QUICK_REFERENCE.md) - Comandos (5 min)
+3. [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Problems
+
+### 👨‍💼 Manager / Product Owner
+Queres entender a ideia e acompanhar progresso.
+
+**Lê**:
+1. [LEIA-ME.md](LEIA-ME.md) - Overview (5 min)
+2. [STATUS_REPORT.md](STATUS_REPORT.md) - Status (5 min)
+
+---
+
+## 📋 Todos os Documentos
+
+| Documento | Propósito | Tempo |
+|-----------|-----------|--------|
+| [LEIA-ME.md](LEIA-ME.md) ⭐ | Introdução ao projeto | 5 min |
+| [SETUP_PT.md](SETUP_PT.md) ⭐⭐ | Instalação step-by-step | 20 min |
+| [FEATURES.md](FEATURES.md) ⭐ | Guia de todas as features | 15 min |
+| [API_ROUTES.md](API_ROUTES.md) ⭐ | Documentação de APIs | 20 min |
+| [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Referência rápida | 5 min |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) ⭐ | Guia de problemas | 5-15 min |
+| [STATUS_REPORT.md](STATUS_REPORT.md) | Status do projeto | 10 min |
+| [PHASE_2_SUMMARY.md](PHASE_2_SUMMARY.md) | Arquitetura & design | 20 min |
+| [EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md) | Para stakeholders | 10 min |
+| [TESTING_GUIDE.md](TESTING_GUIDE.md) | Como testar | 2-4 hrs |
+| [QUICK_START_FEATURES.md](QUICK_START_FEATURES.md) | 30-segundo overview | 5 min |
+| [FEATURES_OVERVIEW.md](FEATURES_OVERVIEW.md) | Features com exemplos | 15 min |
+
+---
+
+## 🔍 Procurar por Tópico
+
+| Procuro... | Abre este ficheiro |
+|------------|------------------|
+| Instalar JQuality | [SETUP_PT.md](SETUP_PT.md) |
+| Entender o projeto | [LEIA-ME.md](LEIA-ME.md) |
+| Gerar testes BDD | [FEATURES.md](FEATURES.md#2️⃣-scenario-generation) |
+| Publicar em Confluence | [FEATURES.md](FEATURES.md#3️⃣-documentation-pipeline) |
+| Sincronizar Jira | [FEATURES.md](FEATURES.md#1️⃣-sprints-management) |
+| Buscar tickets históricos | [FEATURES.md](FEATURES.md#5️⃣-search--historical-lookup) |
+| Rota de API X | [API_ROUTES.md](API_ROUTES.md) |
+| Problema técnico | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
+| Status do projeto | [STATUS_REPORT.md](STATUS_REPORT.md) |
+| Comando rápido | [QUICK_REFERENCE.md](QUICK_REFERENCE.md) |
+
+---
+
+## 📍 Reading by Role
 
 ---
 
