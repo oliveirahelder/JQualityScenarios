@@ -43,3 +43,7 @@ yarn-error.log*
 prisma/prisma/dev.db
 prisma/*.db
 prisma/prisma/
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+
