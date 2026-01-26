@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -54,6 +54,10 @@ type MetricCard = {
 
 export default function Dashboard() {
   const [metricsLoading, setMetricsLoading] = useState(true)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState('')
+  const [syncError, setSyncError] = useState('')
   const [selectedSprintId, setSelectedSprintId] = useState<string | null>(null)
   const [selectedActiveSprintId, setSelectedActiveSprintId] = useState<string | null>(null)
   const [selectedDevSprintId, setSelectedDevSprintId] = useState<string | null>(null)
@@ -130,41 +134,84 @@ export default function Dashboard() {
       inProgress: number
     }>,
   })
-  useEffect(() => {
-    const loadMetrics = async () => {
-      try {
-        const authToken = localStorage.getItem('token')
-        const response = await fetch('/api/metrics/jira?includeDeliveryTimes=0', {
-          headers: { Authorization: `Bearer ${authToken}` },
-        })
-        if (!response.ok) {
-          return
-        }
-        const data = await response.json()
-        setMetricValues({
-          activeSprintCount: data.activeSprintCount ?? null,
-          activeSprints: data.activeSprints || [],
-          storyPoints: {
-            currentTotal: data.storyPoints?.currentTotal ?? null,
-            previousTotal: data.storyPoints?.previousTotal ?? null,
-            delta: data.storyPoints?.delta ?? null,
-          },
-          finishedComparison: data.finishedComparison ?? null,
-          finishedComparisonByTeam: data.finishedComparisonByTeam || [],
-          storyPointsByTeam: data.storyPointsByTeam || [],
-          assignees: data.assignees || [],
-          deliveryTimes: data.deliveryTimes || [],
-          deliveryTimesBySprint: data.deliveryTimesBySprint || [],
-        })
-      } catch {
-        // Keep defaults on error
-      } finally {
-        setMetricsLoading(false)
+  const loadMetrics = useCallback(async () => {
+    setMetricsLoading(true)
+    try {
+      const authToken = localStorage.getItem('token')
+      const response = await fetch('/api/metrics/jira?includeDeliveryTimes=0', {
+        headers: { Authorization: `Bearer ${authToken}` },
+      })
+      if (!response.ok) {
+        return
       }
+      const data = await response.json()
+      setMetricValues({
+        activeSprintCount: data.activeSprintCount ?? null,
+        activeSprints: data.activeSprints || [],
+        storyPoints: {
+          currentTotal: data.storyPoints?.currentTotal ?? null,
+          previousTotal: data.storyPoints?.previousTotal ?? null,
+          delta: data.storyPoints?.delta ?? null,
+        },
+        finishedComparison: data.finishedComparison ?? null,
+        finishedComparisonByTeam: data.finishedComparisonByTeam || [],
+        storyPointsByTeam: data.storyPointsByTeam || [],
+        assignees: data.assignees || [],
+        deliveryTimes: data.deliveryTimes || [],
+        deliveryTimesBySprint: data.deliveryTimesBySprint || [],
+      })
+    } catch {
+      // Keep defaults on error
+    } finally {
+      setMetricsLoading(false)
     }
-
-    loadMetrics()
   }, [])
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem('user')
+    if (!storedUser) {
+      setIsAdmin(false)
+      return
+    }
+    try {
+      const parsed = JSON.parse(storedUser)
+      setIsAdmin(parsed?.role === 'ADMIN')
+    } catch {
+      setIsAdmin(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadMetrics()
+  }, [loadMetrics])
+
+  const handleJiraSync = async () => {
+    setSyncing(true)
+    setSyncMessage('')
+    setSyncError('')
+
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch('/api/admin/sprints/sync', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type: 'all' }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to sync Jira data')
+      }
+      setSyncMessage('Jira sync completed.')
+      await loadMetrics()
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Failed to sync Jira data')
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   useEffect(() => {
     if (metricValues.activeSprints.length === 0) return
@@ -759,9 +806,25 @@ export default function Dashboard() {
         </div>
 
         <div className="mb-8">
-          <div className="mb-4">
-            <h2 className="text-2xl font-bold text-white">Overview</h2>
-            <p className="text-slate-400 text-sm">Key sprint and delivery signals</p>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-white">Overview</h2>
+              <p className="text-slate-400 text-sm">Key sprint and delivery signals</p>
+            </div>
+            {isAdmin ? (
+              <div className="flex flex-col sm:items-end gap-1.5">
+                <Button
+                  size="sm"
+                  onClick={handleJiraSync}
+                  disabled={syncing}
+                  className="bg-blue-600/80 hover:bg-blue-600 text-white"
+                >
+                  {syncing ? 'Syncing...' : 'Jira Sync'}
+                </Button>
+                {syncMessage ? <div className="text-xs text-green-300">{syncMessage}</div> : null}
+                {syncError ? <div className="text-xs text-red-300">{syncError}</div> : null}
+              </div>
+            ) : null}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {generalMetrics.map((metric, idx) => renderMetricCard(metric, `general-${idx}`))}

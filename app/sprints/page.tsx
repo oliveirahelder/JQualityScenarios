@@ -1,11 +1,11 @@
 'use client'
 
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Calendar, AlertCircle, ChevronRight, Zap, RefreshCw, CheckSquare, FileText } from 'lucide-react'
+import { Calendar, AlertCircle, ChevronLeft, ChevronRight, Zap, CheckSquare, FileText } from 'lucide-react'
 
 export default function SprintsPage() {
   type SprintTicket = {
@@ -69,8 +69,6 @@ export default function SprintsPage() {
   const [jiraBaseUrl, setJiraBaseUrl] = useState('')
   const [loading, setLoading] = useState(true)
   const [jiraBoardId, setJiraBoardId] = useState<number | null>(null)
-  const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all')
-  const [selectedSprintName, setSelectedSprintName] = useState('')
   const [filterBySprint, setFilterBySprint] = useState<
     Record<string, 'all' | 'dev' | 'qa' | 'closed' | 'bounce' | 'final'>
   >({})
@@ -79,9 +77,14 @@ export default function SprintsPage() {
   >({})
   const [assigneeFilterBySprint, setAssigneeFilterBySprint] = useState<Record<string, string>>({})
   const [expandedSprints, setExpandedSprints] = useState<Record<string, boolean>>({})
+  const [teamViewFilter, setTeamViewFilter] = useState<
+    Record<string, 'all' | 'active' | 'completed'>
+  >({})
+  const [selectedCompletedByTeam, setSelectedCompletedByTeam] = useState<Record<string, string>>({})
   const [userRole, setUserRole] = useState<string>('')
-  const [syncingSprintId, setSyncingSprintId] = useState<string | null>(null)
+  const router = useRouter()
   const searchParams = useSearchParams()
+  const carouselRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const getSprintProgress = (tickets: SprintTicket[] | undefined) => {
     const total = tickets?.length || 0
@@ -159,27 +162,49 @@ export default function SprintsPage() {
     return `${diffDays}d ago`
   }
 
-  const syncSprintFromJira = async (sprintId: string) => {
-    try {
-      setSyncingSprintId(sprintId)
-      const token = localStorage.getItem('token')
-      const response = await fetch('/api/admin/sprints/sync?type=active', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      })
+  const getTeamKey = (name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return 'TEAM'
+    const match = trimmed.match(/^[A-Za-z0-9]+/)
+    return match ? match[0].toUpperCase() : trimmed.toUpperCase()
+  }
 
-      if (response.ok) {
-        // Refresh sprints data
-        await fetchSprints()
-      }
-    } catch (error) {
-      console.error('Error syncing sprint:', error)
-    } finally {
-      setSyncingSprintId(null)
-    }
+  const isCompletedSprint = (sprint: SprintItem) =>
+    sprint.status === 'COMPLETED' || sprint.status === 'CLOSED'
+
+  const isActiveSprint = (sprint: SprintItem) => sprint.status === 'ACTIVE'
+
+  const getSprintDurationDays = (sprint: SprintItem) => {
+    const start = new Date(sprint.startDate)
+    const end = new Date(sprint.endDate)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0
+    const diffMs = end.getTime() - start.getTime()
+    const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+    return Math.max(days, 1)
+  }
+
+  const getSprintDaysElapsed = (sprint: SprintItem) => {
+    const start = new Date(sprint.startDate)
+    if (Number.isNaN(start.getTime())) return 0
+    const now = new Date()
+    const diffMs = now.getTime() - start.getTime()
+    const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+    const duration = getSprintDurationDays(sprint)
+    return Math.min(Math.max(days, 0), duration)
+  }
+
+  const getStoryPointsTotals = (sprint: SprintItem) => {
+    const total =
+      sprint.storyPointsTotal ??
+      sprint.snapshotTotals?.storyPointsTotal ??
+      (sprint.tickets || []).reduce((sum, ticket) => sum + (ticket.storyPoints || 0), 0)
+    const closed =
+      sprint.storyPointsCompleted ??
+      sprint.snapshotTotals?.storyPointsClosed ??
+      (sprint.tickets || [])
+        .filter((ticket) => isClosedStatus(ticket.status || undefined))
+        .reduce((sum, ticket) => sum + (ticket.storyPoints || 0), 0)
+    return { total, closed }
   }
 
   const getImpactAreas = (ticket: SprintTicket) => {
@@ -348,7 +373,11 @@ export default function SprintsPage() {
     if (!searchParams || sprints.length === 0) return
     const filterParam = searchParams.get('filter')
     if (filterParam === 'active' || filterParam === 'completed' || filterParam === 'all') {
-      setFilter(filterParam)
+      const nextFilters: Record<string, 'all' | 'active' | 'completed'> = {}
+      for (const sprint of sprints) {
+        nextFilters[getTeamKey(sprint.name)] = filterParam
+      }
+      setTeamViewFilter(nextFilters)
     }
     const sprintId = searchParams.get('sprintId')
     const devOnly = searchParams.get('devOnly') === '1'
@@ -401,30 +430,18 @@ export default function SprintsPage() {
     }
   }, [searchParams, sprints])
 
+  const sprintsByTeam = useMemo(() => {
+    const grouped = new Map<string, SprintItem[]>()
+    for (const sprint of sprints) {
+      const key = getTeamKey(sprint.name)
+      const list = grouped.get(key) || []
+      list.push(sprint)
+      grouped.set(key, list)
+    }
+    return grouped
+  }, [sprints])
 
-  const filteredSprints = sprints
-    .filter((sprint) => {
-      if (filter === 'active') return sprint.status === 'ACTIVE'
-      if (filter === 'completed') return sprint.status === 'COMPLETED' || sprint.status === 'CLOSED'
-      return true
-    })
-    .filter((sprint) => {
-      if (!selectedSprintName) return true
-      return sprint.name === selectedSprintName
-    })
-
-  const sprintNameOptions = Array.from(
-    new Set(
-      sprints
-        .filter((sprint) => {
-          if (filter === 'active') return sprint.status === 'ACTIVE'
-          if (filter === 'completed') return sprint.status === 'COMPLETED' || sprint.status === 'CLOSED'
-          return true
-        })
-        .map((sprint) => sprint.name)
-        .filter(Boolean)
-    )
-  ).sort((a, b) => a.localeCompare(b))
+  const teamKeys = useMemo(() => Array.from(sprintsByTeam.keys()).sort(), [sprintsByTeam])
 
   const toggleSprint = (sprintId: string) => {
     setExpandedSprints((prev) => ({
@@ -432,6 +449,31 @@ export default function SprintsPage() {
       [sprintId]: !prev[sprintId],
     }))
   }
+
+  useEffect(() => {
+    if (sprintsByTeam.size === 0) return
+    setSelectedCompletedByTeam((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const [teamKey, teamSprints] of sprintsByTeam.entries()) {
+        const completed = teamSprints
+          .filter(isCompletedSprint)
+          .sort((a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime())
+        if (completed.length === 0) {
+          if (next[teamKey]) {
+            delete next[teamKey]
+            changed = true
+          }
+          continue
+        }
+        if (!next[teamKey] || !completed.some((sprint) => sprint.id === next[teamKey])) {
+          next[teamKey] = completed[0].id
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [sprintsByTeam])
 
   const handleClearSprintFilters = (sprintId: string) => {
     setFilterBySprint((prev) => {
@@ -451,44 +493,45 @@ export default function SprintsPage() {
     })
   }
 
+  const handleClearAllFilters = () => {
+    setFilterBySprint({})
+    setSortBySprint({})
+    setAssigneeFilterBySprint({})
+    setExpandedSprints({})
+    setTeamViewFilter({})
+    setSelectedCompletedByTeam({})
+    router.replace('/sprints')
+  }
+
+  const setCarouselRef = (teamKey: string) => (element: HTMLDivElement | null) => {
+    carouselRefs.current[teamKey] = element
+  }
+
+  const scrollCarousel = (teamKey: string, direction: 'left' | 'right') => {
+    const container = carouselRefs.current[teamKey]
+    if (!container) return
+    const scrollBy = Math.round(container.clientWidth * 0.8)
+    const delta = direction === 'left' ? -scrollBy : scrollBy
+    container.scrollBy({ left: delta, behavior: 'smooth' })
+  }
+
   return (
-    <main className="min-h-screen pb-12">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <main className="min-h-screen pb-12 overflow-x-hidden">
+      <div className="max-w-none w-full px-4 sm:px-6 lg:px-8 py-8 overflow-x-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8 animate-fadeIn">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8 animate-fadeIn">
           <div>
             <h1 className="text-4xl font-bold text-white">Sprints Viewer</h1>
             <p className="text-slate-400 mt-1">View and track sprints from Jira</p>
           </div>
-        </div>
-
-        {/* Filter Tabs */}
-        <div className="flex flex-wrap items-center gap-2 mb-8">
-          {(['all', 'active', 'completed'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setFilter(tab)}
-              className={`px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
-                filter === tab
-                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/50'
-                  : 'text-slate-400 hover:text-slate-300 border border-transparent hover:border-slate-700'
-              }`}
-            >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
-          <select
-            value={selectedSprintName}
-            onChange={(event) => setSelectedSprintName(event.target.value)}
-            className="bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-md px-2 py-2 max-w-[260px]"
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={handleClearAllFilters}
+            className="text-slate-400 hover:text-white hover:bg-slate-800/50 text-sm self-start sm:self-auto"
           >
-            <option value="">All sprints</option>
-            {sprintNameOptions.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+            Clear all filters
+          </Button>
         </div>
 
         {/* Sprints List */}
@@ -499,54 +542,284 @@ export default function SprintsPage() {
             </div>
             <p className="text-slate-400 mt-4">Loading sprints...</p>
           </div>
-        ) : filteredSprints.length === 0 ? (
+        ) : teamKeys.length === 0 ? (
           <Card className="glass-card border-slate-700/30">
             <CardContent className="pt-12 text-center">
               <AlertCircle className="w-12 h-12 text-slate-500 mx-auto mb-4" />
-              <p className="text-slate-300 mb-4">
-                {filter === 'all' 
-                  ? 'No sprints yet. Create one to get started.' 
-                  : `No ${filter} sprints found.`}
-              </p>
+              <p className="text-slate-300 mb-4">No sprints yet. Create one to get started.</p>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4">
-            {filteredSprints.map((sprint, idx) => (
-              (() => {
-                const isExpanded = expandedSprints[sprint.id] || false
-                return (
-              <Card 
-                key={sprint.id} 
-                className="glass-card border-slate-700/30 hover:border-blue-500/50 transition-all duration-300 group cursor-pointer animate-slideInUp"
-                style={{ animationDelay: `${idx * 50}ms` }}
-              >
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-3">
-                        <h3 className="text-lg font-semibold text-white group-hover:text-blue-400 transition-colors">
-                          {sprint.name}
-                        </h3>
-                        <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          sprint.status === 'ACTIVE'
-                            ? 'bg-green-500/20 text-green-300 border border-green-500/30'
-                            : sprint.status === 'COMPLETED' || sprint.status === 'CLOSED'
-                            ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                            : 'bg-slate-500/20 text-slate-300 border border-slate-500/30'
-                        }`}>
-                          {sprint.status}
-                        </div>
+          <div className="grid gap-6">
+            {teamKeys.map((teamKey, teamIndex) => {
+              const teamSprints = sprintsByTeam.get(teamKey) || []
+              const activeSprints = teamSprints.filter(isActiveSprint)
+              const completedSprints = teamSprints
+                .filter(isCompletedSprint)
+                .sort((a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime())
+              const viewFilter = teamViewFilter[teamKey] || 'all'
+              const visibleSprints = teamSprints
+                .filter((sprint) => {
+                  if (viewFilter === 'active') return isActiveSprint(sprint)
+                  if (viewFilter === 'completed') return isCompletedSprint(sprint)
+                  return true
+                })
+                .sort((a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime())
+              const currentActiveSprint = [...activeSprints].sort(
+                (a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime()
+              )[0]
+              const selectedCompletedId = selectedCompletedByTeam[teamKey]
+              const selectedCompletedSprint = completedSprints.find(
+                (sprint) => sprint.id === selectedCompletedId
+              )
+              const activeTotals = currentActiveSprint ? getStoryPointsTotals(currentActiveSprint) : null
+              const completedTotals = selectedCompletedSprint
+                ? getStoryPointsTotals(selectedCompletedSprint)
+                : null
+              const activeDuration = currentActiveSprint ? getSprintDurationDays(currentActiveSprint) : 0
+              const activeElapsed = currentActiveSprint ? getSprintDaysElapsed(currentActiveSprint) : 0
+              const completedDuration = selectedCompletedSprint
+                ? getSprintDurationDays(selectedCompletedSprint)
+                : 0
+              const activeClosedTickets = currentActiveSprint
+                ? getFinishedTickets(currentActiveSprint)
+                : 0
+              const completedClosedTickets = selectedCompletedSprint
+                ? getFinishedTickets(selectedCompletedSprint)
+                : 0
+              const activeClosedPerDay = activeElapsed
+                ? Math.round((activeClosedTickets / activeElapsed) * 10) / 10
+                : 0
+              const completedClosedPerDay = completedDuration
+                ? Math.round((completedClosedTickets / completedDuration) * 10) / 10
+                : 0
+              const activeStoryPerDay =
+                activeElapsed && activeTotals
+                  ? Math.round((activeTotals.closed / activeElapsed) * 10) / 10
+                  : 0
+              const completedStoryPerDay =
+                completedDuration && completedTotals
+                  ? Math.round((completedTotals.closed / completedDuration) * 10) / 10
+                  : 0
+
+              return (
+                <Card
+                  key={teamKey}
+                  className="glass-card border-slate-700/30 transition-all duration-300 animate-slideInUp"
+                  style={{ animationDelay: `${teamIndex * 75}ms` }}
+                >
+                  <CardContent className="p-6">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-start lg:gap-6">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Team</div>
+                        <h2 className="text-2xl font-bold text-white">{teamKey}</h2>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {(['all', 'active', 'completed'] as const).map((tab) => (
+                          <button
+                            key={tab}
+                            onClick={() =>
+                              setTeamViewFilter((prev) => ({
+                                ...prev,
+                                [teamKey]: tab,
+                              }))
+                            }
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
+                              viewFilter === tab
+                                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/50'
+                                : 'text-slate-400 hover:text-slate-200 border border-transparent hover:border-slate-700'
+                            }`}
+                          >
+                            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                          </button>
+                        ))}
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
-                          onClick={() => toggleSprint(sprint.id)}
-                          className="ml-auto text-slate-300 hover:text-white hover:bg-slate-800/50"
+                          onClick={() => {
+                            setTeamViewFilter((prev) => {
+                              const next = { ...prev }
+                              delete next[teamKey]
+                              return next
+                            })
+                          }}
+                          className="text-slate-400 hover:text-white hover:bg-slate-800/50 text-xs"
                         >
-                          {isExpanded ? 'Collapse' : 'Expand'}
+                          Clear team filters
                         </Button>
                       </div>
+                    </div>
+
+                    <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                      <div className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-4 w-full">
+                        <div className="text-xs text-slate-400">Current active sprint</div>
+                        <div className="mt-2 text-white font-semibold">
+                          {currentActiveSprint ? currentActiveSprint.name : 'No active sprint'}
+                        </div>
+                        {currentActiveSprint ? (
+                          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                            <div>
+                              <div className="text-slate-500">Tickets closed</div>
+                              <div className="text-white font-semibold">
+                                {activeClosedTickets} / {getPlannedTickets(currentActiveSprint)}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-slate-500">Story points</div>
+                              <div className="text-white font-semibold">
+                                {formatStoryPoints(activeTotals?.closed)} /{' '}
+                                {formatStoryPoints(activeTotals?.total)}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-slate-500">Days elapsed</div>
+                              <div className="text-white font-semibold">
+                                {activeElapsed} / {activeDuration}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-slate-500">Closed per day</div>
+                              <div className="text-white font-semibold">{activeClosedPerDay}</div>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-4 w-full">
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs text-slate-400">Compare with completed sprint</div>
+                          <select
+                            value={selectedCompletedId || ''}
+                            onChange={(event) =>
+                              setSelectedCompletedByTeam((prev) => ({
+                                ...prev,
+                                [teamKey]: event.target.value,
+                              }))
+                            }
+                            className="bg-slate-900/60 border border-slate-700 text-slate-200 text-xs rounded-md px-2 py-1"
+                          >
+                            {completedSprints.length === 0 ? (
+                              <option value="">No completed sprints</option>
+                            ) : (
+                              completedSprints.map((sprint) => (
+                                <option key={sprint.id} value={sprint.id}>
+                                  {sprint.name}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                        </div>
+                        {selectedCompletedSprint ? (
+                          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                            <div>
+                              <div className="text-slate-500">Tickets closed</div>
+                              <div className="text-white font-semibold">
+                                {completedClosedTickets} / {getPlannedTickets(selectedCompletedSprint)}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-slate-500">Story points</div>
+                              <div className="text-white font-semibold">
+                                {formatStoryPoints(completedTotals?.closed)} /{' '}
+                                {formatStoryPoints(completedTotals?.total)}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-slate-500">Sprint duration</div>
+                              <div className="text-white font-semibold">{completedDuration}d</div>
+                            </div>
+                            <div>
+                              <div className="text-slate-500">Closed per day</div>
+                              <div className="text-white font-semibold">{completedClosedPerDay}</div>
+                            </div>
+                            <div>
+                              <div className="text-slate-500">SP per day</div>
+                              <div className="text-white font-semibold">{completedStoryPerDay}</div>
+                            </div>
+                            <div>
+                              <div className="text-slate-500">Active SP/day</div>
+                              <div className="text-white font-semibold">{activeStoryPerDay}</div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mt-3 text-xs text-slate-500">
+                            Select a completed sprint to compare.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-6">
+                      <div className="flex items-center justify-between mb-3 relative">
+                        <div>
+                          <h3 className="text-sm font-semibold text-white">Sprints</h3>
+                          <p className="text-xs text-slate-500">Scroll horizontally to browse</p>
+                        </div>
+                        <div className="flex items-center gap-2 z-10">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => scrollCarousel(teamKey, 'left')}
+                            className="text-slate-400 hover:text-white hover:bg-slate-800/50"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => scrollCarousel(teamKey, 'right')}
+                            className="text-slate-400 hover:text-white hover:bg-slate-800/50"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div
+                        ref={setCarouselRef(teamKey)}
+                        className="flex w-full max-w-full gap-4 overflow-x-auto pb-2 scroll-smooth snap-x snap-mandatory"
+                      >
+                        {visibleSprints.length === 0 ? (
+                          <div className="text-xs text-slate-500">No sprints for this filter.</div>
+                        ) : (
+                          visibleSprints.map((sprint, idx) => {
+                            const isExpanded = expandedSprints[sprint.id] || false
+                            return (
+                            <div
+                              key={sprint.id}
+                              className="flex-none w-full max-w-full sm:w-[70vw] md:w-[520px] lg:w-[calc(50%-0.5rem)] xl:w-[calc(50%-0.75rem)] snap-start"
+                            >
+                                <Card 
+                                  className="glass-card border-slate-700/30 hover:border-blue-500/50 transition-all duration-300 group cursor-pointer animate-slideInUp"
+                                  style={{ animationDelay: `${idx * 50}ms` }}
+                                >
+                                  <CardContent className="p-6">
+                                    <div className="flex items-start justify-between gap-4">
+                                      <div className="flex-1">
+                                        <div className="flex items-center gap-3 mb-3">
+                                          <h3 className="text-lg font-semibold text-white group-hover:text-blue-400 transition-colors">
+                                            {sprint.name}
+                                          </h3>
+                                          <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                            sprint.status === 'ACTIVE'
+                                              ? 'bg-green-500/20 text-green-300 border border-green-500/30'
+                                              : sprint.status === 'COMPLETED' || sprint.status === 'CLOSED'
+                                              ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                              : 'bg-slate-500/20 text-slate-300 border border-slate-500/30'
+                                          }`}>
+                                            {sprint.status}
+                                          </div>
+                                          <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => toggleSprint(sprint.id)}
+                                            className="ml-auto text-slate-300 hover:text-white hover:bg-slate-800/50"
+                                          >
+                                            {isExpanded ? 'Collapse' : 'Expand'}
+                                          </Button>
+                                        </div>
 
                       {/* Sync Status & Last Sync Time */}
                       <div className="flex items-center gap-4 mb-3 text-xs">
@@ -554,18 +827,6 @@ export default function SprintsPage() {
                           <div className="w-2 h-2 rounded-full bg-green-500"></div>
                           <span>Last synced: {getLastSyncTime(sprint.lastSyncedAt)}</span>
                         </div>
-                        {userRole && ['DEVOPS', 'ADMIN'].includes(userRole) && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => syncSprintFromJira(sprint.id)}
-                            disabled={syncingSprintId === sprint.id}
-                            className="text-slate-400 hover:text-blue-400 hover:bg-blue-500/10 p-1 h-auto disabled:opacity-50"
-                          >
-                            <RefreshCw className={`w-3 h-3 ${syncingSprintId === sprint.id ? 'animate-spin' : ''}`} />
-                          </Button>
-                        )}
                       </div>
 
                       {/* Documentation Pipeline Status */}
@@ -953,11 +1214,18 @@ export default function SprintsPage() {
                       )}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-                )
-              })()
-            ))}
+                                  </CardContent>
+                                </Card>
+                              </div>
+                            )
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
         )}
       </div>

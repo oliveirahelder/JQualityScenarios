@@ -27,10 +27,6 @@ export default function ReportsPage() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [snapshots, setSnapshots] = useState<SprintSnapshot[]>([])
   const [error, setError] = useState('')
-  const [boardUrl, setBoardUrl] = useState('')
-  const [syncing, setSyncing] = useState(false)
-  const [syncMessage, setSyncMessage] = useState('')
-  const [syncError, setSyncError] = useState('')
 
   useEffect(() => {
     const storedUser = localStorage.getItem('user')
@@ -69,46 +65,6 @@ export default function ReportsPage() {
     loadReports()
   }, [isAdmin])
 
-  const handleSyncClosed = async () => {
-    setSyncing(true)
-    setSyncMessage('')
-    setSyncError('')
-    setError('')
-
-    try {
-      const token = localStorage.getItem('token')
-      const response = await fetch('/api/admin/sprints/sync', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ type: 'closed_all', boardUrl: boardUrl.trim() || undefined }),
-      })
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to sync closed sprints')
-      }
-      const count = data?.result?.closedSprintCount
-      setSyncMessage(
-        typeof count === 'number'
-          ? `Closed sprints synced: ${count}.`
-          : 'Closed sprints synced.'
-      )
-      const reportsResponse = await fetch('/api/reports/sprints', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const reportsData = await reportsResponse.json()
-      if (reportsResponse.ok) {
-        setSnapshots(reportsData.snapshots || [])
-      }
-    } catch (err) {
-      setSyncError(err instanceof Error ? err.message : 'Failed to sync closed sprints')
-    } finally {
-      setSyncing(false)
-    }
-  }
-
   if (!isAdmin) {
     return (
       <main className="min-h-screen pb-12">
@@ -130,32 +86,6 @@ export default function ReportsPage() {
           <h1 className="text-3xl font-bold text-white">Sprint Reports</h1>
           <p className="text-slate-400 text-sm">Historical metrics for closed sprints.</p>
         </div>
-
-        <Card className="glass-card border-slate-700/30 mb-6">
-          <CardContent className="p-4 md:p-6">
-            <div className="flex flex-col md:flex-row md:items-center gap-3">
-              <input
-                value={boardUrl}
-                onChange={(event) => setBoardUrl(event.target.value)}
-                placeholder="Board URL (RapidBoard.jspa?rapidView=123) or leave empty"
-                className="w-full rounded-md border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-200"
-              />
-              <button
-                onClick={handleSyncClosed}
-                disabled={syncing}
-                className="rounded-md border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800/60 disabled:opacity-60"
-              >
-                {syncing ? 'Syncing...' : 'Sync Closed Sprints'}
-              </button>
-            </div>
-            {syncMessage ? (
-              <div className="mt-3 text-xs text-green-300">{syncMessage}</div>
-            ) : null}
-            {syncError ? (
-              <div className="mt-3 text-xs text-red-300">{syncError}</div>
-            ) : null}
-          </CardContent>
-        </Card>
 
         {loading ? (
           <Card className="glass-card border-slate-700/30">
