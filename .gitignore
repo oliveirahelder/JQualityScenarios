@@ -12,7 +12,6 @@ out/
 build/
 
 # Prisma
-prisma/migrations/
 .env.local
 .env.*.local
 
@@ -42,6 +41,7 @@ yarn-error.log*
 # Local Prisma dev database
 prisma/prisma/dev.db
 prisma/*.db
+prisma/*.db-journal
 prisma/prisma/
 
 # TypeScript build cache

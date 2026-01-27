@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Calendar, AlertCircle, ChevronLeft, ChevronRight, Zap, CheckSquare, FileText } from 'lucide-react'
+import { Calendar, AlertCircle, ChevronLeft, ChevronRight, Zap, FileText } from 'lucide-react'
 
 export default function SprintsPage() {
   type SprintTicket = {
@@ -82,7 +82,6 @@ export default function SprintsPage() {
     Record<string, 'all' | 'active' | 'completed'>
   >({})
   const [selectedCompletedByTeam, setSelectedCompletedByTeam] = useState<Record<string, string>>({})
-  const [userRole, setUserRole] = useState<string>('')
   const router = useRouter()
   const searchParams = useSearchParams()
   const carouselRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -242,8 +241,10 @@ export default function SprintsPage() {
     return match ? match[0].toUpperCase() : trimmed.toUpperCase()
   }
 
-  const isCompletedSprint = (sprint: SprintItem) =>
-    sprint.status === 'COMPLETED' || sprint.status === 'CLOSED'
+  const isCompletedSprint = useCallback(
+    (sprint: SprintItem) => sprint.status === 'COMPLETED' || sprint.status === 'CLOSED',
+    []
+  )
 
   const isActiveSprint = (sprint: SprintItem) => sprint.status === 'ACTIVE'
 
@@ -280,28 +281,6 @@ export default function SprintsPage() {
     return { total, closed }
   }
 
-  const getImpactAreas = (ticket: SprintTicket) => {
-    const devInsight = ticket.devInsights?.[0]
-    if (!devInsight?.detectedImpactAreas) return []
-    try {
-      const areas = JSON.parse(devInsight.detectedImpactAreas)
-      return Array.isArray(areas) ? areas : []
-    } catch {
-      return []
-    }
-  }
-
-  const getScenariosCount = (ticket: SprintTicket) => {
-    return ticket.testScenarios?.length || 0
-  }
-
-  const getImpactColor = (area: string) => {
-    const highRisk = ['DB Schema', 'Auth', 'API']
-    const mediumRisk = ['Error Handling', 'Performance', 'Config']
-    if (highRisk.some((r) => area.includes(r))) return 'bg-red-500/20 text-red-300'
-    if (mediumRisk.some((r) => area.includes(r))) return 'bg-yellow-500/20 text-yellow-300'
-    return 'bg-blue-500/20 text-blue-300'
-  }
 
   const isDevStatus = (status: string | undefined) => {
     const value = (status || '').toLowerCase()
@@ -418,13 +397,12 @@ export default function SprintsPage() {
         setJiraBaseUrl(data.jiraBaseUrl || '')
         setJiraBoardId(typeof data.jiraBoardId === 'number' ? data.jiraBoardId : null)
 
-        // Decode token to get role
+        // Decode token to confirm it is valid.
         if (token) {
           const parts = token.split('.')
           if (parts.length === 3) {
             try {
-              const payload = JSON.parse(atob(parts[1]))
-              setUserRole(payload.role || '')
+              JSON.parse(atob(parts[1]))
             } catch {
               // Ignore decode errors
             }
@@ -546,7 +524,7 @@ export default function SprintsPage() {
       }
       return changed ? next : prev
     })
-  }, [sprintsByTeam])
+  }, [sprintsByTeam, isCompletedSprint])
 
   const handleClearSprintFilters = (sprintId: string) => {
     setFilterBySprint((prev) => {

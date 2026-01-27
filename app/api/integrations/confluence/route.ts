@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
+import { normalizeConfluenceBaseUrl } from '@/lib/confluence-config'
 
 export async function GET(req: NextRequest) {
   try {
@@ -65,8 +66,7 @@ export async function PUT(req: NextRequest) {
 
     const { baseUrl, token: confluenceToken } = await req.json()
 
-    const normalizedBaseUrl =
-      typeof baseUrl === 'string' ? baseUrl.trim().replace(/\/+$/, '') : undefined
+    const normalizedBaseUrl = normalizeConfluenceBaseUrl(baseUrl) || undefined
 
     const updateData: {
       confluenceBaseUrl?: string | null

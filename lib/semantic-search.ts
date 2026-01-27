@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type { JiraCredentials } from '@/lib/jira-config'
 import type { ConfluenceCredentials } from '@/lib/confluence-config'
+import { normalizeConfluenceBaseUrl } from '@/lib/confluence-config'
 
 export interface SearchResult {
   id: string
@@ -9,6 +10,29 @@ export interface SearchResult {
   url: string
   relevanceScore: number
   summary: string
+}
+
+export interface ConfluenceSearchDiagnostics {
+  baseCandidates: string[]
+  scope: {
+    spaceKey?: string | null
+    spaceKeys?: string[]
+    parentPageId?: string | null
+    baseCql?: string | null
+    limit?: number | null
+  }
+  keywords: string[]
+  hadSuccessfulResponse: boolean
+  usedFallback: boolean
+  lastError?: string | null
+}
+
+type ConfluenceSearchScope = {
+  spaceKey?: string | null
+  spaceKeys?: string[]
+  parentPageId?: string | null
+  baseCql?: string | null
+  limit?: number | null
 }
 
 type ConfluenceSearchResponse = {
@@ -117,18 +141,29 @@ export async function searchJiraTickets(
   }
 }
 
+function escapeCql(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
 /**
  * Search Confluence pages using keyword search
  */
 export async function searchConfluencePages(
   query: string,
-  credentials?: ConfluenceCredentials
+  credentials?: ConfluenceCredentials,
+  scope?: ConfluenceSearchScope
 ): Promise<SearchResult[]> {
   try {
-    const searchTerms = generateSearchTerms(query)
+    const rawQuery = query.trim()
+    const extractedTerms = generateSearchTerms(rawQuery)
+    const searchTerms = [rawQuery, ...extractedTerms].filter((term, index, array) =>
+      term && array.indexOf(term) === index
+    )
 
     // Search Confluence using API
-    const confluenceUrl = credentials?.baseUrl || process.env.CONFLUENCE_BASE_URL
+    const confluenceUrl = normalizeConfluenceBaseUrl(
+      credentials?.baseUrl || process.env.CONFLUENCE_BASE_URL
+    )
     const user = credentials?.user || process.env.CONFLUENCE_USER
     const token = credentials?.token || process.env.CONFLUENCE_API_TOKEN
     const authType = credentials?.authType || 'basic'
@@ -139,79 +174,164 @@ export async function searchConfluencePages(
 
     const results: SearchResult[] = []
     const baseCandidates = new Set<string>()
-    baseCandidates.add(confluenceUrl.replace(/\/+$/, ''))
-    if (!confluenceUrl.includes('/confluence')) {
-      baseCandidates.add(`${confluenceUrl.replace(/\/+$/, '')}/confluence`)
+    const trimmedBase = confluenceUrl.replace(/\/+$/, '')
+    baseCandidates.add(trimmedBase)
+    try {
+      const parsedBase = new URL(trimmedBase)
+      const basePath = parsedBase.pathname.toLowerCase()
+      if (!basePath || basePath === '/') {
+        baseCandidates.add(`${parsedBase.origin}/confluence`)
+        baseCandidates.add(`${parsedBase.origin}/wiki`)
+      }
+    } catch {
+      // Keep only the trimmed base for invalid URLs.
     }
 
-    const buildCql = (keyword: string) =>
-      `type = page AND (text ~ "${keyword}" OR title ~ "${keyword}")`
+    const normalizedSpaceKey = scope?.spaceKey?.trim()
+    const normalizedSpaceKeys =
+      scope?.spaceKeys?.map((key) => key.trim()).filter(Boolean) ?? []
+    const normalizedParentId = scope?.parentPageId?.trim()
+    const hasNumericParentId = normalizedParentId && /^\d+$/.test(normalizedParentId)
+    const scopeClauses: string[] = []
+    if (normalizedSpaceKeys.length > 0) {
+      scopeClauses.push(
+        `space in (${normalizedSpaceKeys.map((key) => `"${escapeCql(key)}"`).join(',')})`
+      )
+    } else if (normalizedSpaceKey) {
+      scopeClauses.push(`space = "${escapeCql(normalizedSpaceKey)}"`)
+    }
+    if (hasNumericParentId) {
+      scopeClauses.push(`ancestor = ${normalizedParentId}`)
+    }
 
-    for (const keyword of searchTerms) {
-      try {
-        let confluenceResponse: ConfluenceSearchResponse | null = null
+    const runSearch = async (scopeFilter: string) => {
+      let hadSuccessfulResponse = false
+      let lastError: string | null = null
+      const resultLimit = Math.min(Math.max(scope?.limit ?? 10, 1), 25)
+      const baseFilter = scope?.baseCql?.trim()
+      const filterParts = []
+      if (baseFilter) {
+        filterParts.push(`(${baseFilter})`)
+      } else {
+        filterParts.push('type = page')
+      }
+      if (scopeFilter) {
+        filterParts.push(scopeFilter)
+      }
+      const filterCql = filterParts.join(' AND ')
+      const buildCql = (keyword: string) => {
+        const safe = escapeCql(keyword)
+        const useWildcard = safe.length < 3
+        const term = useWildcard ? `${safe}*` : safe
+        return `${filterCql} AND (siteSearch ~ "${term}" OR text ~ "${term}" OR title ~ "${term}")`
+      }
 
-        for (const baseUrl of baseCandidates) {
-          try {
-            confluenceResponse = await axios.get(
-              `${baseUrl}/rest/api/content/search`,
-              {
-                params: {
-                  cql: buildCql(keyword),
-                  expand: 'body.view',
-                  limit: 5,
-                },
-                auth:
-                  authType === 'basic'
-                    ? {
-                        username: user as string,
-                        password: token,
-                      }
-                    : undefined,
-                headers:
-                  authType === 'bearer'
-                    ? {
-                        Authorization: `Bearer ${token}`,
-                      }
-                    : undefined,
+      for (const keyword of searchTerms) {
+        try {
+          let confluenceResponse: ConfluenceSearchResponse | null = null
+
+          for (const baseUrl of baseCandidates) {
+            try {
+              confluenceResponse = await axios.get(
+                `${baseUrl}/rest/api/content/search`,
+                {
+                  params: {
+                    cql: buildCql(keyword),
+                    expand: 'body.view',
+                    limit: resultLimit,
+                  },
+                  auth:
+                    authType === 'basic'
+                      ? {
+                          username: user as string,
+                          password: token,
+                        }
+                      : undefined,
+                  headers:
+                    authType === 'bearer'
+                      ? {
+                          Authorization: `Bearer ${token}`,
+                        }
+                      : undefined,
+                  timeout: credentials?.requestTimeout || 30000,
+                }
+              )
+              hadSuccessfulResponse = true
+              if ((confluenceResponse?.data?.results || []).length > 0) {
+                break
               }
-            )
-            if ((confluenceResponse?.data?.results || []).length > 0) {
-              break
+            } catch (error) {
+              if (axios.isAxiosError(error)) {
+                const status = error.response?.status
+                lastError =
+                  status && status >= 400
+                    ? `Confluence search failed (${status}). Check base URL or permissions.`
+                    : error.message
+              } else if (error instanceof Error) {
+                lastError = error.message
+              }
+              confluenceResponse = null
+              continue
             }
-          } catch {
-            confluenceResponse = null
+          }
+
+          if (!confluenceResponse) {
             continue
           }
-        }
 
-        if (!confluenceResponse) {
-          continue
-        }
+          for (const page of confluenceResponse.data.results || []) {
+            const baseUrl = (confluenceUrl || '').replace(/\/+$/, '')
+            const webUrl = page._links?.webui
+              ? `${baseUrl}${page._links.webui}`
+              : page._links?.tinyui
+              ? `${baseUrl}${page._links.tinyui}`
+              : page._links?.self || ''
 
-        for (const page of confluenceResponse.data.results || []) {
-          const baseUrl = (confluenceUrl || '').replace(/\/+$/, '')
-          const webUrl = page._links?.webui
-            ? `${baseUrl}${page._links.webui}`
-            : page._links?.tinyui
-            ? `${baseUrl}${page._links.tinyui}`
-            : page._links?.self || ''
-
-          results.push({
-            id: page.id,
-            title: page.title,
-            type: 'confluence_page',
-            url: webUrl,
-            relevanceScore: calculateRelevance(page.title, query),
-            summary: extractPageSummary(page.body?.view?.value || ''),
-          })
+            results.push({
+              id: page.id,
+              title: page.title,
+              type: 'confluence_page',
+              url: webUrl,
+              relevanceScore: calculateRelevance(page.title, query),
+              summary: extractPageSummary(page.body?.view?.value || ''),
+            })
+          }
+        } catch (error) {
+          console.error(`Error searching Confluence for keyword "${keyword}":`, error)
         }
-      } catch (error) {
-        console.error(`Error searching Confluence for keyword "${keyword}":`, error)
+      }
+      return { hadSuccessfulResponse, lastError }
+    }
+
+    const scopeFilter = scopeClauses.length > 0 ? scopeClauses.join(' AND ') : ''
+    const scopedStatus = await runSearch(scopeFilter)
+    let status = scopedStatus
+
+    if (results.length === 0 && scopeFilter) {
+      const fallbackStatus = await runSearch('')
+      status = {
+        hadSuccessfulResponse:
+          scopedStatus.hadSuccessfulResponse || fallbackStatus.hadSuccessfulResponse,
+        lastError: fallbackStatus.lastError || scopedStatus.lastError,
       }
     }
 
-    return results.sort((a, b) => b.relevanceScore - a.relevanceScore)
+    const uniqueResults = Array.from(new Map(results.map((r) => [r.id, r])).values())
+    if (!status.hadSuccessfulResponse && status.lastError) {
+      throw new Error(status.lastError)
+    }
+
+    if (uniqueResults.length === 0 && status.hadSuccessfulResponse) {
+      console.warn('[Confluence Search] No results', {
+        query,
+        spaceKey: normalizedSpaceKey || null,
+        spaceKeys: normalizedSpaceKeys,
+        parentPageId: hasNumericParentId ? normalizedParentId : null,
+        baseCandidates: Array.from(baseCandidates),
+      })
+    }
+
+    return uniqueResults.sort((a, b) => b.relevanceScore - a.relevanceScore)
   } catch (error) {
     console.error('Error in semantic Confluence search:', error)
     throw new Error('Failed to search Confluence pages')

@@ -59,7 +59,18 @@ export default function DocumentationPage() {
   const [historyType, setHistoryType] = useState<'all' | 'jira' | 'confluence'>('all')
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState('')
+  const [historyConfluenceError, setHistoryConfluenceError] = useState('')
+  const [historyConfluenceDiagnostics, setHistoryConfluenceDiagnostics] = useState<{
+    baseUrl: string | null
+    scope: { spaceKey?: string | null; spaceKeys?: string[]; parentPageId?: string | null; baseCql?: string | null; limit?: number | null }
+    publishTarget?: { parentPageId?: string | null }
+    resultsCount: number
+  } | null>(null)
   const [historyRan, setHistoryRan] = useState(false)
+  const [availableSpaces, setAvailableSpaces] = useState<Array<{ key: string; name: string }>>([])
+  const [selectedSpaces, setSelectedSpaces] = useState<string[]>([])
+  const [spacesLoading, setSpacesLoading] = useState(false)
+  const [spacesError, setSpacesError] = useState('')
   const [historyResults, setHistoryResults] = useState<{
     jira: SearchResult[]
     confluence: SearchResult[]
@@ -68,6 +79,49 @@ export default function DocumentationPage() {
   useEffect(() => {
     fetchDrafts()
   }, [])
+
+  useEffect(() => {
+    const storedSpaces = localStorage.getItem('confluenceSearchSpaces')
+    if (storedSpaces) {
+      try {
+        const parsed = JSON.parse(storedSpaces)
+        if (Array.isArray(parsed)) {
+          setSelectedSpaces(parsed.filter((key) => typeof key === 'string'))
+        }
+      } catch {
+        // Ignore invalid storage.
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const fetchSpaces = async () => {
+      setSpacesLoading(true)
+      setSpacesError('')
+      try {
+        const token = localStorage.getItem('token')
+        const response = await fetch('/api/confluence/spaces', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!response.ok) {
+          const data = await response.json()
+          throw new Error(data.error || 'Failed to load spaces')
+        }
+        const data = await response.json()
+        setAvailableSpaces(data.spaces || [])
+      } catch (error) {
+        setSpacesError(error instanceof Error ? error.message : 'Failed to load spaces')
+      } finally {
+        setSpacesLoading(false)
+      }
+    }
+
+    fetchSpaces()
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem('confluenceSearchSpaces', JSON.stringify(selectedSpaces))
+  }, [selectedSpaces])
 
   useEffect(() => {
     if (!selectedDraft) {
@@ -187,8 +241,9 @@ export default function DocumentationPage() {
     setHistoryError('')
     try {
       const token = localStorage.getItem('token')
+      const spacesQuery = `&spaces=${encodeURIComponent(selectedSpaces.join(','))}`
       const response = await fetch(
-        `/api/search?q=${encodeURIComponent(historyQuery)}&type=${historyType}`,
+        `/api/search?q=${encodeURIComponent(historyQuery)}&type=${historyType}&cache=false${spacesQuery}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -206,6 +261,8 @@ export default function DocumentationPage() {
         jira: data.jiraResults || [],
         confluence: data.confluenceResults || [],
       })
+      setHistoryConfluenceError(data.confluenceError || '')
+      setHistoryConfluenceDiagnostics(data.confluenceDiagnostics || null)
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : 'Failed to search')
     } finally {
@@ -292,6 +349,50 @@ export default function DocumentationPage() {
                   {historyError}
                 </div>
               ) : null}
+              <div className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-4">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="text-xs uppercase text-slate-400">Spaces</div>
+                  <button
+                    type="button"
+                    className="text-[11px] text-slate-400 hover:text-slate-200"
+                    onClick={() => setSelectedSpaces([])}
+                  >
+                    Clear
+                  </button>
+                </div>
+                {spacesError ? (
+                  <div className="text-xs text-amber-300 mb-2">{spacesError}</div>
+                ) : null}
+                {spacesLoading ? (
+                  <div className="text-xs text-slate-500">Loading spaces...</div>
+                ) : availableSpaces.length === 0 ? (
+                  <div className="text-xs text-slate-500">No spaces returned.</div>
+                ) : (
+                  <div className="max-h-32 overflow-y-auto space-y-2 pr-2">
+                    {availableSpaces.map((space) => (
+                      <label key={space.key} className="flex items-center gap-2 text-xs text-slate-200">
+                        <input
+                          type="checkbox"
+                          className="accent-blue-500"
+                          checked={selectedSpaces.includes(space.key)}
+                          onChange={(e) => {
+                            setSelectedSpaces((prev) =>
+                              e.target.checked
+                                ? [...prev, space.key]
+                                : prev.filter((key) => key !== space.key)
+                            )
+                          }}
+                        />
+                        <span className="font-semibold">{space.key}</span>
+                        <span className="text-slate-500">{space.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <div className="text-[11px] text-slate-500 mt-2">
+                  Leave empty to search all spaces you can access.
+                </div>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-4">
                   <div className="flex items-center gap-2 text-xs uppercase text-slate-400 mb-3">
@@ -325,8 +426,37 @@ export default function DocumentationPage() {
                   <p className="text-[11px] text-slate-500 mb-3">
                     Content excerpts are pulled from matching pages.
                   </p>
+                  {historyConfluenceError ? (
+                    <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/40 rounded-md px-3 py-2 mb-3">
+                      {historyConfluenceError}
+                    </div>
+                  ) : null}
+                  {historyResults.confluence.length === 0 && historyConfluenceDiagnostics ? (
+                    <div className="text-[11px] text-slate-500 mb-3 space-y-1">
+                      <div>Base URL: {historyConfluenceDiagnostics.baseUrl || 'n/a'}</div>
+                      <div>
+                        Search scope: {historyConfluenceDiagnostics.scope?.spaceKey || 'all'}
+                        {historyConfluenceDiagnostics.scope?.parentPageId
+                          ? ` | Parent: ${historyConfluenceDiagnostics.scope?.parentPageId}`
+                          : null}
+                      </div>
+                      {historyConfluenceDiagnostics.scope?.baseCql ? (
+                        <div>CQL: {historyConfluenceDiagnostics.scope?.baseCql}</div>
+                      ) : null}
+                      {historyConfluenceDiagnostics.scope?.limit ? (
+                        <div>Limit: {historyConfluenceDiagnostics.scope?.limit}</div>
+                      ) : null}
+                      {historyConfluenceDiagnostics.publishTarget?.parentPageId ? (
+                        <div>
+                          Publish target: {historyConfluenceDiagnostics.publishTarget.parentPageId}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {historyResults.confluence.length === 0 ? (
-                    <p className="text-xs text-slate-500">No Confluence matches yet.</p>
+                    <p className="text-xs text-slate-500">
+                      No Confluence matches yet. Try a full page title or review the Admin scope.
+                    </p>
                   ) : (
                     <div className="space-y-3">
                       {historyResults.confluence.map((item) => (

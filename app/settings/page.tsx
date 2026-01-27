@@ -86,6 +86,10 @@ export default function SettingsPage() {
   const [dbStatus, setDbStatus] = useState<'ok' | 'error' | 'checking'>('checking')
   const [adminJiraBaseUrl, setAdminJiraBaseUrl] = useState('')
   const [adminConfluenceBaseUrl, setAdminConfluenceBaseUrl] = useState('')
+  const [adminConfluenceSpaceKey, setAdminConfluenceSpaceKey] = useState('')
+  const [adminConfluenceParentPageId, setAdminConfluenceParentPageId] = useState('')
+  const [adminConfluenceSearchCql, setAdminConfluenceSearchCql] = useState('')
+  const [adminConfluenceSearchLimit, setAdminConfluenceSearchLimit] = useState('10')
   const [adminSprintsToSync, setAdminSprintsToSync] = useState('10')
   const [adminSaving, setAdminSaving] = useState(false)
   const [adminError, setAdminError] = useState('')
@@ -185,12 +189,23 @@ export default function SettingsPage() {
         const adminData = await adminResponse.json()
         const nextAdminJiraBaseUrl = adminData?.jiraBaseUrl || ''
         const nextAdminConfluenceBaseUrl = adminData?.confluenceBaseUrl || ''
+        const nextAdminConfluenceSpaceKey = adminData?.confluenceSpaceKey || ''
+        const nextAdminConfluenceParentPageId = adminData?.confluenceParentPageId || ''
+        const nextAdminConfluenceSearchCql = adminData?.confluenceSearchCql || ''
+        const nextAdminConfluenceSearchLimit =
+          typeof adminData?.confluenceSearchLimit === 'number'
+            ? adminData.confluenceSearchLimit.toString()
+            : '10'
         const nextAdminSprintsToSync =
           typeof adminData?.sprintsToSync === 'number'
             ? adminData.sprintsToSync.toString()
             : '10'
         setAdminJiraBaseUrl(nextAdminJiraBaseUrl)
         setAdminConfluenceBaseUrl(nextAdminConfluenceBaseUrl)
+        setAdminConfluenceSpaceKey(nextAdminConfluenceSpaceKey)
+        setAdminConfluenceParentPageId(nextAdminConfluenceParentPageId)
+        setAdminConfluenceSearchCql(nextAdminConfluenceSearchCql)
+        setAdminConfluenceSearchLimit(nextAdminConfluenceSearchLimit)
         setAdminSprintsToSync(nextAdminSprintsToSync)
         if (!jiraData?.baseUrl && nextAdminJiraBaseUrl) {
           setJiraSettings((prev) => ({ ...prev, baseUrl: nextAdminJiraBaseUrl }))
@@ -532,6 +547,10 @@ export default function SettingsPage() {
       const normalizedSprintsToSync = Number.isFinite(parsedSprintsToSync)
         ? parsedSprintsToSync
         : undefined
+      const parsedConfluenceSearchLimit = Number.parseInt(adminConfluenceSearchLimit, 10)
+      const normalizedConfluenceSearchLimit = Number.isFinite(parsedConfluenceSearchLimit)
+        ? parsedConfluenceSearchLimit
+        : undefined
       const authToken = localStorage.getItem('token')
       const response = await fetch('/api/admin/settings', {
         method: 'PUT',
@@ -542,6 +561,10 @@ export default function SettingsPage() {
         body: JSON.stringify({
           jiraBaseUrl: adminJiraBaseUrl,
           confluenceBaseUrl: adminConfluenceBaseUrl,
+          confluenceSpaceKey: adminConfluenceSpaceKey,
+          confluenceParentPageId: adminConfluenceParentPageId,
+          confluenceSearchCql: adminConfluenceSearchCql,
+          confluenceSearchLimit: normalizedConfluenceSearchLimit,
           sprintsToSync: normalizedSprintsToSync,
         }),
       })
@@ -579,7 +602,6 @@ export default function SettingsPage() {
       if (!response.ok) {
         throw new Error(data.error || 'Failed to sync Jira')
       }
-      const count = data?.result?.closedSprints?.closedSprintCount ?? data?.result?.closedSprintCount
       const now = new Date().toISOString()
       setJiraLastSyncAt(now)
       localStorage.setItem('jiraLastSyncAt', now)
@@ -1005,11 +1027,48 @@ export default function SettingsPage() {
                   className="bg-slate-800/50 border-slate-700"
                 />
                 <Input
-                  placeholder="Confluence Base URL"
+                  placeholder="Confluence Base URL (e.g. https://confluence.jumia.com)"
                   value={adminConfluenceBaseUrl}
                   onChange={(e) => setAdminConfluenceBaseUrl(e.target.value)}
                   className="bg-slate-800/50 border-slate-700"
                 />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Input
+                    placeholder="Confluence Space Key (e.g. NAFAMZ)"
+                    value={adminConfluenceSpaceKey}
+                    onChange={(e) => setAdminConfluenceSpaceKey(e.target.value)}
+                    className="bg-slate-800/50 border-slate-700"
+                  />
+                  <Input
+                    placeholder="Confluence Parent Page ID or URL"
+                    value={adminConfluenceParentPageId}
+                    onChange={(e) => setAdminConfluenceParentPageId(e.target.value)}
+                    className="bg-slate-800/50 border-slate-700"
+                  />
+                </div>
+                <Input
+                  placeholder="Confluence Search CQL (optional)"
+                  value={adminConfluenceSearchCql}
+                  onChange={(e) => setAdminConfluenceSearchCql(e.target.value)}
+                  className="bg-slate-800/50 border-slate-700"
+                />
+                <div>
+                  <div className="text-xs text-slate-400 mb-2">Confluence Search Limit</div>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50}
+                    placeholder="10"
+                    value={adminConfluenceSearchLimit}
+                    onChange={(e) => setAdminConfluenceSearchLimit(e.target.value)}
+                    className="bg-slate-800/50 border-slate-700"
+                  />
+                </div>
+                <p className="text-xs text-slate-500">
+                  These values scope Confluence search and define the default documentation tree.
+                  You can paste a full page URL for the parent page ID. Optional CQL lets you
+                  pre-filter content types for faster searches.
+                </p>
                 <div>
                   <div className="text-xs text-slate-400 mb-2">
                     Nr Sprints to Sync (metrics will be based on this)

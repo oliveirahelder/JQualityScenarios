@@ -3,7 +3,11 @@ import { searchJiraTickets, searchConfluencePages } from '@/lib/semantic-search'
 import { prisma } from '@/lib/prisma'
 import { verifyToken, extractTokenFromHeader } from '@/lib/auth'
 import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
-import { buildConfluenceCredentialsFromUser } from '@/lib/confluence-config'
+import {
+  buildConfluenceCredentialsFromUser,
+  extractConfluenceParentPageId,
+  extractConfluenceSpaceKey,
+} from '@/lib/confluence-config'
 import type { SearchResult } from '@/lib/semantic-search'
 
 function parseCachedResults(value: string | null): SearchResult[] {
@@ -51,12 +55,34 @@ export async function GET(request: NextRequest) {
       user,
       adminSettings?.confluenceBaseUrl || null
     )
+    const confluenceSpaceKey =
+      adminSettings?.confluenceSpaceKey ||
+      extractConfluenceSpaceKey(adminSettings?.confluenceBaseUrl || null) ||
+      null
+    const confluencePublishParentId =
+      extractConfluenceParentPageId(adminSettings?.confluenceParentPageId || null) ||
+      extractConfluenceParentPageId(adminSettings?.confluenceBaseUrl || null) ||
+      null
+    const spacesParam = searchParams.get('spaces')
+    const hasSpacesParam = spacesParam !== null
+    const spaceKeys = (spacesParam || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+    const confluenceScope = {
+      spaceKey: hasSpacesParam ? null : confluenceSpaceKey,
+      spaceKeys: hasSpacesParam ? spaceKeys : [],
+      parentPageId: null,
+      baseCql: adminSettings?.confluenceSearchCql || null,
+      limit: adminSettings?.confluenceSearchLimit ?? null,
+    }
 
     // Get search query and type
     const { searchParams } = new URL(request.url)
     const query = searchParams.get('q')
     const type = searchParams.get('type') || 'all' // 'jira', 'confluence', 'all'
     const includeCache = searchParams.get('cache') !== 'false'
+    const cacheKey = `${type}:${query ?? ''}`
 
     if (!query || query.trim().length === 0) {
       return NextResponse.json(
@@ -71,7 +97,7 @@ export async function GET(request: NextRequest) {
         where: {
           userId_query: {
             userId: user.id,
-            query,
+            query: cacheKey,
           },
         },
       })
@@ -105,9 +131,16 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    let confluenceError: string | null = null
     const confluencePromise =
       type === 'all' || type === 'confluence'
-        ? searchConfluencePages(query, confluenceCredentials || undefined)
+        ? searchConfluencePages(query, confluenceCredentials || undefined, confluenceScope).catch(
+            (error) => {
+              confluenceError =
+                error instanceof Error ? error.message : 'Failed to search Confluence'
+              return []
+            }
+          )
         : Promise.resolve([])
 
     const [jiraResults, confluenceResults] = await Promise.all([
@@ -126,7 +159,7 @@ export async function GET(request: NextRequest) {
             },
           },
           create: {
-            query,
+            query: cacheKey,
             userId: user.id,
             jiraResults: JSON.stringify(jiraResults),
             confluenceResults: JSON.stringify(confluenceResults),
@@ -144,12 +177,26 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const confluenceDiagnostics =
+      type === 'all' || type === 'confluence'
+        ? {
+            baseUrl: confluenceCredentials?.baseUrl || null,
+            scope: confluenceScope,
+            publishTarget: {
+              parentPageId: confluencePublishParentId,
+            },
+            resultsCount: confluenceResults.length,
+          }
+        : undefined
+
     return NextResponse.json({
       success: true,
       cached: false,
       query,
       jiraResults,
       confluenceResults,
+      confluenceError: confluenceError || undefined,
+      confluenceDiagnostics,
       totalResults: jiraResults.length + confluenceResults.length,
     })
   } catch (error) {

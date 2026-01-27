@@ -58,6 +58,10 @@ model AdminSettings {
   id               String   @id @default(cuid())
   jiraBaseUrl      String?
   confluenceBaseUrl String?
+  confluenceSpaceKey String?
+  confluenceParentPageId String?
+  confluenceSearchCql String?
+  confluenceSearchLimit Int?
   sprintsToSync    Int      @default(10)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
