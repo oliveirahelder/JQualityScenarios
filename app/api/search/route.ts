@@ -46,6 +46,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
+    const { searchParams } = new URL(request.url)
+    const query = searchParams.get('q')
+    const type = searchParams.get('type') || 'all' // 'jira', 'confluence', 'all'
+    const includeCache = searchParams.get('cache') !== 'false'
+    const cacheKey = `${type}:${query ?? ''}`
+
     const adminSettings = await prisma.adminSettings.findFirst()
     const jiraCredentials = buildJiraCredentialsFromUser(
       user,
@@ -76,13 +82,6 @@ export async function GET(request: NextRequest) {
       baseCql: adminSettings?.confluenceSearchCql || null,
       limit: adminSettings?.confluenceSearchLimit ?? null,
     }
-
-    // Get search query and type
-    const { searchParams } = new URL(request.url)
-    const query = searchParams.get('q')
-    const type = searchParams.get('type') || 'all' // 'jira', 'confluence', 'all'
-    const includeCache = searchParams.get('cache') !== 'false'
-    const cacheKey = `${type}:${query ?? ''}`
 
     if (!query || query.trim().length === 0) {
       return NextResponse.json(

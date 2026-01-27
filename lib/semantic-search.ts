@@ -154,6 +154,37 @@ export async function searchConfluencePages(
   scope?: ConfluenceSearchScope
 ): Promise<SearchResult[]> {
   try {
+    const allowedConfluenceTypes = ['page', 'blogpost', 'attachment']
+    const sanitizeBaseCql = (value?: string | null) => {
+      const trimmed = value?.trim()
+      if (!trimmed) return null
+      const typeInMatch = trimmed.match(/type\s+in\s*\(([^)]+)\)/i)
+      if (typeInMatch) {
+        const requestedTypes = typeInMatch[1]
+          .split(',')
+          .map((entry) => entry.trim().replace(/^\"|\"$/g, ''))
+          .filter(Boolean)
+        const filteredTypes = requestedTypes.filter((type) =>
+          allowedConfluenceTypes.includes(type.toLowerCase())
+        )
+        const replacementTypes = (filteredTypes.length > 0
+          ? filteredTypes
+          : allowedConfluenceTypes
+        ).map((type) => `"${type}"`)
+        return trimmed.replace(typeInMatch[0], `type in (${replacementTypes.join(',')})`)
+      }
+      const typeEqualsMatch = trimmed.match(/type\s*=\s*\"?([a-z0-9:_-]+)\"?/i)
+      if (typeEqualsMatch) {
+        const requestedType = typeEqualsMatch[1].toLowerCase()
+        if (!allowedConfluenceTypes.includes(requestedType)) {
+          return trimmed.replace(
+            typeEqualsMatch[0],
+            `type in (${allowedConfluenceTypes.map((type) => `"${type}"`).join(',')})`
+          )
+        }
+      }
+      return trimmed
+    }
     const rawQuery = query.trim()
     const extractedTerms = generateSearchTerms(rawQuery)
     const searchTerms = [rawQuery, ...extractedTerms].filter((term, index, array) =>
@@ -207,8 +238,8 @@ export async function searchConfluencePages(
     const runSearch = async (scopeFilter: string) => {
       let hadSuccessfulResponse = false
       let lastError: string | null = null
-      const resultLimit = Math.min(Math.max(scope?.limit ?? 10, 1), 25)
-      const baseFilter = scope?.baseCql?.trim()
+      const resultLimit = Math.min(Math.max(scope?.limit ?? 10, 1), 50)
+      const baseFilter = sanitizeBaseCql(scope?.baseCql) || null
       const filterParts = []
       if (baseFilter) {
         filterParts.push(`(${baseFilter})`)

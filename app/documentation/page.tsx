@@ -435,7 +435,10 @@ export default function DocumentationPage() {
                     <div className="text-[11px] text-slate-500 mb-3 space-y-1">
                       <div>Base URL: {historyConfluenceDiagnostics.baseUrl || 'n/a'}</div>
                       <div>
-                        Search scope: {historyConfluenceDiagnostics.scope?.spaceKey || 'all'}
+                        Search scope:{' '}
+                        {historyConfluenceDiagnostics.scope?.spaceKeys?.length
+                          ? historyConfluenceDiagnostics.scope.spaceKeys.join(', ')
+                          : historyConfluenceDiagnostics.scope?.spaceKey || 'all'}
                         {historyConfluenceDiagnostics.scope?.parentPageId
                           ? ` | Parent: ${historyConfluenceDiagnostics.scope?.parentPageId}`
                           : null}
