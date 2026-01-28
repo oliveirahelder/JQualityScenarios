@@ -1,25 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
+import { withAuth, withRole } from '@/lib/middleware'
 import { prisma } from '@/lib/prisma'
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { draftId: string } }
-) {
+export const GET = withAuth(async (req: NextRequest & { user?: any }, { params }: { params: { draftId: string } }) => {
   try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
-
     const draft = await prisma.documentationDraft.findUnique({
       where: { id: params.draftId },
-      include: { ticket: true, sprint: true },
+      include: {
+        ticket: true,
+        sprint: true,
+        linkedTickets: { include: { ticket: true } },
+      },
     })
 
     if (!draft) {
@@ -34,23 +25,10 @@ export async function GET(
       { status: 500 }
     )
   }
-}
+})
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { draftId: string } }
-) {
+export const PATCH = withAuth(async (req: NextRequest & { user?: any }, { params }: { params: { draftId: string } }) => {
   try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
-
     const {
       title,
       content,
@@ -70,6 +48,11 @@ export async function PATCH(
         ...(testResults && { testResults }),
         ...(status && { status }),
       },
+      include: {
+        ticket: true,
+        sprint: true,
+        linkedTickets: { include: { ticket: true } },
+      },
     })
 
     return NextResponse.json({ draft })
@@ -80,22 +63,11 @@ export async function PATCH(
       { status: 500 }
     )
   }
-}
+})
 
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { draftId: string } }
-) {
+export const DELETE = withAuth(async (req: NextRequest & { user?: any }, { params }: { params: { draftId: string } }) => {
   try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
+    const payload = req.user
 
     const draft = await prisma.documentationDraft.findUnique({
       where: { id: params.draftId },
@@ -122,4 +94,4 @@ export async function DELETE(
       { status: 500 }
     )
   }
-}
+})

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
+import { withAuth, withRole } from '@/lib/middleware'
 import {
   syncAllSprints,
   syncActiveSprints,
@@ -14,78 +14,67 @@ import type { JiraCredentials } from '@/lib/jira-config'
  * POST /api/admin/sprints/sync
  * Manually trigger sprint sync (DEVOPS/ADMIN only)
  */
-export async function POST(req: NextRequest) {
-  try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+export const POST = withAuth(
+  withRole('DEVOPS', 'ADMIN')(async (req: NextRequest & { user?: any }) => {
+    try {
+      const payload = req.user
 
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
+      const user = await prisma.user.findUnique({
+        where: { id: payload.userId },
+      })
+      if (!user) {
+        return NextResponse.json({ error: 'User not found' }, { status: 404 })
+      }
 
-    // Only DEVOPS and ADMIN can trigger sync
-    if (!['DEVOPS', 'ADMIN'].includes(payload.role)) {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
-    }
+      const adminSettings = await prisma.adminSettings.findFirst()
+      const jiraCredentials = buildJiraCredentialsFromUser(
+        user,
+        adminSettings?.jiraBaseUrl || null
+      )
+      if (!jiraCredentials) {
+        return NextResponse.json(
+          { error: 'Jira integration not configured' },
+          { status: 400 }
+        )
+      }
 
-    const user = await prisma.user.findUnique({
-      where: { id: payload.userId },
-    })
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
-    }
+      const { type = 'all', boardUrl, boardIds } = await req.json()
 
-    const adminSettings = await prisma.adminSettings.findFirst()
-    const jiraCredentials = buildJiraCredentialsFromUser(
-      user,
-      adminSettings?.jiraBaseUrl || null
-    )
-    if (!jiraCredentials) {
+      const overrideBoardIds = parseBoardIds(boardIds, boardUrl)
+      const credentials: JiraCredentials = overrideBoardIds
+        ? { ...jiraCredentials, boardIds: overrideBoardIds }
+        : jiraCredentials
+
+      let result
+
+      switch (type) {
+        case 'active':
+          result = await syncActiveSprints(credentials)
+          break
+        case 'closed':
+          result = await syncRecentClosedSprints(credentials)
+          break
+        case 'closed_all':
+          result = await syncAllClosedSprints(credentials)
+          break
+        case 'all':
+        default:
+          result = await syncAllSprints(credentials)
+      }
+
+      return NextResponse.json({
+        message: 'Sprint sync completed',
+        result,
+      })
+    } catch (error) {
+      console.error('Error triggering sprint sync:', error)
       return NextResponse.json(
-        { error: 'Jira integration not configured' },
-        { status: 400 }
+        { error: 'Failed to sync sprints' },
+        { status: 500 }
       )
     }
-
-    const { type = 'all', boardUrl, boardIds } = await req.json()
-
-    const overrideBoardIds = parseBoardIds(boardIds, boardUrl)
-    const credentials: JiraCredentials = overrideBoardIds
-      ? { ...jiraCredentials, boardIds: overrideBoardIds }
-      : jiraCredentials
-
-    let result
-
-    switch (type) {
-      case 'active':
-        result = await syncActiveSprints(credentials)
-        break
-      case 'closed':
-        result = await syncRecentClosedSprints(credentials)
-        break
-      case 'closed_all':
-        result = await syncAllClosedSprints(credentials)
-        break
-      case 'all':
-      default:
-        result = await syncAllSprints(credentials)
-    }
-
-    return NextResponse.json({
-      message: 'Sprint sync completed',
-      result,
-    })
-  } catch (error) {
-    console.error('Error triggering sprint sync:', error)
-    return NextResponse.json(
-      { error: 'Failed to sync sprints' },
-      { status: 500 }
-    )
-  }
-}
+  })
+)
 
 function parseBoardIds(
   rawIds: string | undefined,
@@ -120,18 +109,8 @@ function extractBoardIdFromUrl(value: string): number | null {
  * GET /api/admin/sprints/sync-status
  * Check last sync status
  */
-export async function GET(req: NextRequest) {
+export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
-
     // Status endpoint available to all authenticated users
     return NextResponse.json({
       status: 'running',
@@ -145,4 +124,4 @@ export async function GET(req: NextRequest) {
       { status: 500 }
     )
   }
-}
+})

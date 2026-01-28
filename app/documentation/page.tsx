@@ -16,6 +16,7 @@ type DocumentationDraft = {
   testResults?: string | null
   createdAt: string
   ticket?: { jiraId?: string | null } | null
+  linkedTickets?: Array<{ ticket?: { jiraId?: string | null } | null }> | null
   sprint?: { name: string } | null
   confluencePageId?: string | null
   confluenceUrl?: string | null
@@ -86,7 +87,9 @@ export default function DocumentationPage() {
       try {
         const parsed = JSON.parse(storedSpaces)
         if (Array.isArray(parsed)) {
-          setSelectedSpaces(parsed.filter((key) => typeof key === 'string'))
+          setSelectedSpaces(
+            parsed.filter((key) => typeof key === 'string' && key.trim().length > 0)
+          )
         }
       } catch {
         // Ignore invalid storage.
@@ -160,14 +163,23 @@ export default function DocumentationPage() {
   }
 
   const searchTerm = searchQuery.trim().toLowerCase()
+  const getDraftTicketIds = (draft: DocumentationDraft) => {
+    const ids = [
+      draft.ticket?.jiraId,
+      ...(draft.linkedTickets ?? []).map((link) => link.ticket?.jiraId),
+    ]
+      .filter((value): value is string => Boolean(value && value.trim()))
+    return Array.from(new Set(ids))
+  }
   const filteredDrafts = drafts.filter((draft) => {
-    const ticketId = draft.ticket?.jiraId?.toLowerCase() ?? ''
+    const ticketIds = getDraftTicketIds(draft)
     const matchSearch = !searchTerm ||
       draft.title.toLowerCase().includes(searchTerm) ||
-      ticketId.includes(searchTerm)
+      ticketIds.some((id) => id.toLowerCase().includes(searchTerm))
     const matchStatus = !filterStatus || draft.status === filterStatus
     return matchSearch && matchStatus
   })
+  const selectedDraftTicketIds = selectedDraft ? getDraftTicketIds(selectedDraft) : []
 
   const uniqueStatuses = Array.from(new Set(drafts.map(d => d.status)))
 
@@ -240,8 +252,14 @@ export default function DocumentationPage() {
     setHistoryLoading(true)
     setHistoryError('')
     try {
+      if (historyType !== 'jira' && selectedSpaces.length === 0 && availableSpaces.length > 0) {
+        throw new Error('Select at least one Confluence space to search.')
+      }
       const token = localStorage.getItem('token')
-      const spacesQuery = `&spaces=${encodeURIComponent(selectedSpaces.join(','))}`
+      const spacesQuery =
+        selectedSpaces.length > 0
+          ? `&spaces=${encodeURIComponent(selectedSpaces.join(','))}`
+          : ''
       const response = await fetch(
         `/api/search?q=${encodeURIComponent(historyQuery)}&type=${historyType}&cache=false${spacesQuery}`,
         {
@@ -390,7 +408,7 @@ export default function DocumentationPage() {
                   </div>
                 )}
                 <div className="text-[11px] text-slate-500 mt-2">
-                  Leave empty to search all spaces you can access.
+                  Select at least one space to run a Confluence search.
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -579,52 +597,58 @@ export default function DocumentationPage() {
               </Card>
             ) : (
               <div className="space-y-4">
-                {filteredDrafts.map((draft, idx) => (
-                  <Card
-                    key={draft.id}
-                    className={`glass-card border-slate-700/30 hover:border-blue-500/50 transition-all duration-300 cursor-pointer group animate-slideInUp ${
-                      selectedDraft?.id === draft.id ? 'border-blue-500/50 ring-1 ring-blue-500/20' : ''
-                    }`}
-                    onClick={() => setSelectedDraft(draft)}
-                    style={{ animationDelay: `${idx * 50}ms` }}
-                  >
-                    <CardContent className="p-6">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-start gap-3 mb-3">
-                            <h3 className="text-lg font-semibold text-white group-hover:text-blue-400 transition-colors flex-1">
-                              {draft.title}
-                            </h3>
-                            <div className={`badge ${statusColors[draft.status as keyof typeof statusColors]} border`}>
-                              {draft.status}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-4 text-sm mb-3">
-                            <div className="text-slate-400">
-                              Ticket: <span className="font-mono text-slate-300">{draft.ticket?.jiraId || 'N/A'}</span>
-                            </div>
-                            {draft.sprint && (
-                              <div className="text-slate-400">
-                                Sprint: <span className="text-slate-300">{draft.sprint.name}</span>
+                {filteredDrafts.map((draft, idx) => {
+                  const linkedTicketIds = getDraftTicketIds(draft)
+                  return (
+                    <Card
+                      key={draft.id}
+                      className={`glass-card border-slate-700/30 hover:border-blue-500/50 transition-all duration-300 cursor-pointer group animate-slideInUp ${
+                        selectedDraft?.id === draft.id ? 'border-blue-500/50 ring-1 ring-blue-500/20' : ''
+                      }`}
+                      onClick={() => setSelectedDraft(draft)}
+                      style={{ animationDelay: `${idx * 50}ms` }}
+                    >
+                      <CardContent className="p-6">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-start gap-3 mb-3">
+                              <h3 className="text-lg font-semibold text-white group-hover:text-blue-400 transition-colors flex-1">
+                                {draft.title}
+                              </h3>
+                              <div className={`badge ${statusColors[draft.status as keyof typeof statusColors]} border`}>
+                                {draft.status}
                               </div>
-                            )}
-                          </div>
+                            </div>
 
-                          <p className="text-sm text-slate-400 line-clamp-2">
-                            {viewMode === 'automation'
-                              ? draft.technicalNotes || draft.content || 'No automation scenarios yet.'
-                              : draft.testResults || draft.content || 'No manual scenarios yet.'}
-                          </p>
+                            <div className="flex flex-wrap gap-4 text-sm mb-3">
+                              <div className="text-slate-400">
+                                Linked tickets:{' '}
+                                <span className="font-mono text-slate-300">
+                                  {linkedTicketIds.length > 0 ? linkedTicketIds.join(', ') : 'N/A'}
+                                </span>
+                              </div>
+                              {draft.sprint && (
+                                <div className="text-slate-400">
+                                  Sprint: <span className="text-slate-300">{draft.sprint.name}</span>
+                                </div>
+                              )}
+                            </div>
 
-                          <div className="mt-3 text-xs text-slate-500">
-                            Created {new Date(draft.createdAt).toLocaleDateString()}
+                            <p className="text-sm text-slate-400 line-clamp-2">
+                              {viewMode === 'automation'
+                                ? draft.technicalNotes || draft.content || 'No automation scenarios yet.'
+                                : draft.testResults || draft.content || 'No manual scenarios yet.'}
+                            </p>
+
+                            <div className="mt-3 text-xs text-slate-500">
+                              Created {new Date(draft.createdAt).toLocaleDateString()}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                      </CardContent>
+                    </Card>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -641,12 +665,33 @@ export default function DocumentationPage() {
                     </div>
                   </div>
                   <CardTitle className="text-lg">{selectedDraft.title}</CardTitle>
-                  <CardDescription className="mt-2 font-mono">
-                    {selectedDraft.ticket?.jiraId || 'Ticket N/A'}
+                  <CardDescription className="mt-2">
+                    <span className="text-slate-400">Linked tickets:</span>{' '}
+                    <span className="font-mono text-slate-200">
+                      {selectedDraftTicketIds.length > 0 ? selectedDraftTicketIds.join(', ') : 'N/A'}
+                    </span>
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="pt-6">
                   <div className="space-y-6">
+                    <div>
+                      <p className="text-xs text-slate-400 font-semibold uppercase mb-2">
+                        Theme
+                      </p>
+                      {isEditing ? (
+                        <Input
+                          value={editDraft?.title || ''}
+                          onChange={(e) =>
+                            setEditDraft((prev) => (prev ? { ...prev, title: e.target.value } : prev))
+                          }
+                          className="bg-slate-900/40 border-slate-700/40 text-slate-200"
+                        />
+                      ) : (
+                        <div className="text-sm text-slate-200 bg-slate-900/40 border border-slate-700/40 rounded-lg p-3">
+                          {selectedDraft.title}
+                        </div>
+                      )}
+                    </div>
                     {actionError ? (
                       <div className="text-xs text-red-300 bg-red-500/10 border border-red-500/40 rounded-md px-3 py-2">
                         {actionError}
@@ -772,7 +817,7 @@ export default function DocumentationPage() {
             )}
           </div>
         </div>
-      </div>
+        </div>
       </div>
     </main>
   )

@@ -244,7 +244,10 @@ export async function searchConfluencePages(
       if (baseFilter) {
         filterParts.push(`(${baseFilter})`)
       } else {
-        filterParts.push('type = page')
+        const defaultTypes = allowedConfluenceTypes
+          .map((type) => `"${type}"`)
+          .join(',')
+        filterParts.push(`type in (${defaultTypes})`)
       }
       if (scopeFilter) {
         filterParts.push(scopeFilter)
@@ -278,15 +281,28 @@ export async function searchConfluencePages(
                           password: token,
                         }
                       : undefined,
-                  headers:
-                    authType === 'bearer'
+                  headers: {
+                    ...(authType === 'bearer'
                       ? {
                           Authorization: `Bearer ${token}`,
                         }
-                      : undefined,
+                      : {}),
+                    ...(credentials?.accessClientId && credentials?.accessClientSecret
+                      ? {
+                          'CF-Access-Client-Id': credentials.accessClientId,
+                          'CF-Access-Client-Secret': credentials.accessClientSecret,
+                        }
+                      : {}),
+                  },
                   timeout: credentials?.requestTimeout || 30000,
                 }
               )
+              if (
+                typeof confluenceResponse.data === 'string' &&
+                confluenceResponse.headers?.['content-type']?.includes('text/html')
+              ) {
+                throw new Error('Confluence is protected by Cloudflare Access.')
+              }
               hadSuccessfulResponse = true
               if ((confluenceResponse?.data?.results || []).length > 0) {
                 break

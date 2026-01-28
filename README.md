@@ -1,173 +1,343 @@
-# JQuality - Test Automation & Documentation Platform
+# JQuality Platform
 
-**Automate test scenario generation and documentation from Jira, GitHub, and Confluence.**
+**Centralized Quality Assurance & Test Automation Platform**
+
+A modern internal platform that automates test scenario generation, documentation, and code impact analysis across Jira, GitHub, and Confluence integrations—designed for QA engineers, developers, and technical leadership.
 
 ---
 
 ## What is JQuality?
 
-JQuality automatically generates BDD test scenarios and documentation when developers create Jira tickets and open GitHub PRs. Instead of QA teams writing tests manually after development, JQuality creates them in real-time with full code traceability.
+JQuality is an enterprise-grade platform that eliminates manual test writing by automatically generating BDD/Gherkin test scenarios from Jira tickets and analyzing code impact from GitHub pull requests. The platform maintains 100% traceability from ticket → code → test → documentation.
 
-### The Problem
-- ❌ QA teams write tests manually (slow, error-prone)
-- ❌ Context is lost after development
-- ❌ Documentation gets outdated
-- ❌ No traceability between code and tests
-
-### The Solution
-- ✅ Automatic test generation from Jira tickets
-- ✅ Code impact analysis from GitHub PRs
-- ✅ BDD/Gherkin test scenarios
-- ✅ Auto-published documentation to Confluence
-- ✅ **100% traceability**: ticket → code → test → docs
+### Key Benefits
+- **⚡ 10x Faster Testing**: Automatic test scenario generation replaces manual writing
+- **📊 Complete Traceability**: Link tickets, code changes, tests, and documentation
+- **🤖 AI-Powered**: OpenAI-driven scenario generation with intelligent context extraction
+- **📚 Auto-Documentation**: Generate and publish documentation directly to Confluence
+- **🎯 Risk Analysis**: Automatic code impact assessment for every pull request
+- **🔍 Smart Search**: Semantic search across tickets and documentation
 
 ---
 
-## Architecture
+## Platform Overview
 
-| Component | Technology |
-|-----------|-----------|
-| Frontend | Next.js 14 + Tailwind CSS |
-| Backend | Node.js API Routes |
-| Database | PostgreSQL + Prisma ORM |
-| AI Engine | OpenAI (scenarios) + Gemini Pro (search) |
-| Integrations | Jira, GitHub, Confluence APIs |
+### For QA Engineers
+- **Auto-Generate Tests**: Create comprehensive BDD scenarios in seconds
+- **Review & Approve**: Curate generated content before publishing
+- **Track Coverage**: Monitor test scenario generation across sprints
+- **Historical Search**: Find related tests and edge cases instantly
+
+### For Developers
+- **Code Impact Insights**: See which components changed and their risk levels
+- **Test Coverage**: Access generated tests for code review
+- **Sprint Analytics**: Track development metrics and patterns
+- **Integration Status**: Monitor Jira, GitHub, and Confluence connections
+
+### For Technical Leaders
+- **Executive Dashboard**: Sprint health, delivery metrics, quality trends
+- **Team Analytics**: Test generation rates, documentation status, approval workflows
+- **Risk Assessment**: Automatic risk level detection for deployments
+- **Audit Trail**: Complete traceability for compliance requirements
 
 ---
 
 ## Core Features
 
 ### 1. Sprint Management
-- Real-time sync from Jira
-- Track ticket progress
-- Code impact analysis
-- Test scenario count
+Sync Jira sprints in real-time and track all tickets with automatic code impact classification.
+
+| Risk Level | Use Case | Examples |
+|---|---|---|
+| 🔴 High | Database, Auth, APIs | Schema changes, OAuth2, Payment gateway |
+| 🟡 Medium | Error handling, Performance | Timeouts, Caching, Config updates |
+| 🔵 Standard | UI, Tests, Dependencies | Button fixes, test additions, library updates |
 
 ### 2. Automatic Test Generation
-- BDD/Gherkin scenarios
-- Happy path + edge cases
-- Error handling scenarios
+Generate complete BDD/Gherkin scenarios with happy paths and edge cases automatically.
+
+```gherkin
+Scenario: User login with OAuth2
+  Given I am on the login page
+  When I click "Login with Google"
+  Then I am redirected to /dashboard
+  And I receive a valid JWT token
+  
+Scenario: Login fails with invalid credentials
+  Given I am on the login page
+  When I enter invalid email "invalid@test.com"
+  And I enter password "wrong123"
+  Then I see error "Invalid credentials"
+  And I remain on the login page
+```
 
 ### 3. Code Impact Analysis
-- Detects changed components
-- Risk level classification
-- File-by-file tracking
+GitHub integration analyzes pull requests to identify changed components, risk levels, and affected features.
+
+- **File Tracking**: Line-by-line changes per file
+- **Component Analysis**: Automatic detection of changed modules
+- **Risk Classification**: Intelligent risk level assignment
+- **Dependency Graph**: Understanding of changed dependencies
 
 ### 4. Documentation Pipeline
-- Auto-generate drafts
-- QA review workflow
-- Publish to Confluence
+Auto-generate "As-Built" documentation with QA review workflow and direct Confluence publishing.
 
-### 5. Historical Search
-- Semantic search across tickets
-- Find related documentation
+**Workflow States**:
+- 📝 **Draft**: Auto-generated content, ready for review
+- 🔍 **Under Review**: QA team reviewing and editing
+- ✅ **Approved**: Content approved, ready to publish
+- 📄 **Published**: Live in Confluence
+
+### 5. Semantic Search
+AI-powered search across all tickets and documentation with intelligent relevance ranking.
+
+**Example Queries**:
+- "How do I configure OAuth2?"
+- "Which tickets changed authentication?"
+- "Show me payment processing bugs"
+- "Find database migration tests"
+
+### 6. Dashboard & Analytics
+Executive and team dashboards providing real-time insights into quality metrics and team performance.
+
+**Metrics Tracked**:
+- Test scenario generation rate
+- Documentation approval time
+- Code impact distribution
+- Risk assessment accuracy
+- Team productivity trends
+
+---
+
+## Technology Stack
+
+| Layer | Technology |
+|---|---|
+| **Frontend** | Next.js 14, React 18, Tailwind CSS |
+| **Backend** | Node.js, TypeScript, Next.js API Routes |
+| **Database** | PostgreSQL 14+, Prisma ORM |
+| **AI Engine** | OpenAI (GPT-4 for scenarios), Gemini Pro (search) |
+| **Integrations** | Jira API, GitHub API, Confluence API |
+| **Authentication** | JWT, OAuth2, Role-Based Access Control |
 
 ---
 
 ## Quick Start
 
 ### Prerequisites
-- Node.js 18+
-- PostgreSQL 14+
-- API keys: Jira, GitHub, OpenAI, Gemini
+- **Node.js** 18 or higher
+- **PostgreSQL** 14 or higher (or Docker)
+- **API Keys**: Jira, GitHub, OpenAI, Gemini Pro
 
-### Installation
+### Installation (5 minutes)
+
 ```bash
+# 1. Clone and install
+git clone <repository>
 cd JQualityScenarios
 npm install
+
+# 2. Setup environment
 cp .env.example .env.local
-# Edit .env.local with API keys
+# Edit .env.local with your API keys and database URL
+
+# 3. Setup database
 npx prisma migrate dev
+npx prisma generate
+
+# 4. Start development server
 npm run dev
 ```
 
-Visit `http://localhost:3000`
+Visit **http://localhost:3000** and login with your credentials.
+
+> **Full setup guide**: See [SETUP.md](SETUP.md) for detailed configuration (20 minutes)
 
 ---
 
-## Getting Started
+## User Roles & Permissions
 
-1. **Install**: [SETUP.md](SETUP.md) (20 minutes)
-2. **Overview**: [QUICK_START.md](QUICK_START.md) (5 minutes)
-3. **Features**: [FEATURES.md](FEATURES.md) (15 minutes)
-4. **APIs**: [API_ROUTES.md](API_ROUTES.md) (20 minutes)
-5. **Issues**: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+| Role | Permissions | Use Case |
+|---|---|---|
+| **QA Engineer** | Generate, review, approve scenarios & docs | Test automation, quality assurance |
+| **Developer** | View scenarios, code impact, analytics | Development, testing, PR reviews |
+| **Technical Leader** | Dashboard access, analytics, admin settings | Team management, decision making |
+| **Admin** | Full system access, user management, integrations | Platform maintenance, configuration |
 
 ---
 
-## User Roles
+## Common Tasks
 
-| Role | Permissions |
-|------|-----------|
-| **QA** | Generate/edit/publish scenarios & docs |
-| **Developer** | View-only access |
-| **DevOps** | Manage webhooks and sync |
-| **Admin** | Full system access |
+### Generate Test Scenarios
+1. Navigate to **Sprints** → Select a sprint
+2. Click on any **ticket**
+3. Click **Generate Scenarios**
+4. Review and edit scenarios
+5. Click **Save** to persist
+
+### Publish Documentation
+1. Go to **Documentation** → **Drafts**
+2. Review content
+3. Click **Approve**
+4. Click **Publish to Confluence**
+
+### View Code Impact
+1. Open **Sprints** dashboard
+2. Risk color codes appear next to tickets
+3. Click a ticket to see modified files
+4. Review risk assessment
+
+### Search Documentation
+1. Go to **Search** page
+2. Enter natural language query
+3. View results ranked by relevance
+4. Click result to view full content
+
+---
+
+## Project Structure
+
+```
+JQualityScenarios/
+├── app/                          # Next.js App Router
+│   ├── api/                      # Backend API routes
+│   │   ├── scenarios/            # Test scenario endpoints
+│   │   ├── sprints/              # Sprint management
+│   │   ├── documentation-drafts/ # Documentation pipeline
+│   │   ├── integrations/         # Jira, GitHub, Confluence
+│   │   └── metrics/              # Analytics and reporting
+│   ├── dashboard/                # Executive dashboard
+│   ├── scenarios/                # Scenario management UI
+│   ├── sprints/                  # Sprint tracking UI
+│   └── documentation/            # Documentation review UI
+├── components/                   # Shared React components
+│   └── ui/                       # Shadcn UI primitives
+├── lib/                          # Core business logic
+│   ├── jira-service.ts          # Jira integration
+│   ├── github-service.ts        # GitHub integration
+│   ├── jira-sprints.ts          # Sprint management
+│   ├── semantic-search.ts       # AI search
+│   └── prisma.ts                # Database client
+├── prisma/                       # Database schema
+│   ├── schema.prisma            # Data models
+│   └── migrations/              # Database migrations
+└── public/                       # Static assets
+```
+
+---
+
+## Environment Configuration
+
+Required environment variables (see `.env.example` for details):
+
+```bash
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/qabot_dev
+
+# Jira
+JIRA_BASE_URL=https://your-domain.atlassian.net
+JIRA_USER=your-email@company.com
+JIRA_API_TOKEN=your-api-token
+
+# GitHub
+GITHUB_TOKEN=ghp_xxxxx
+
+# Confluence
+CONFLUENCE_BASE_URL=https://your-domain.atlassian.net/wiki
+CONFLUENCE_API_TOKEN=your-token
+
+# AI/LLM
+OPENAI_API_KEY=sk-xxxxx
+GEMINI_API_KEY=xxxxx
+```
+
+---
+
+## API Overview
+
+All API routes follow REST conventions and require authentication via JWT token.
+
+### Key Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `POST` | `/api/scenarios/generate` | Generate test scenarios |
+| `POST` | `/api/scenarios/save` | Save generated scenarios |
+| `GET` | `/api/sprints` | List synced sprints |
+| `POST` | `/api/sprints/sync` | Sync from Jira |
+| `GET` | `/api/documentation-drafts` | List draft documents |
+| `POST` | `/api/documentation-drafts` | Create documentation |
+| `GET` | `/api/search` | Semantic search tickets |
+
+See [API_REFERENCE.md](API_REFERENCE.md) for complete endpoint documentation.
+
+---
+
+## Development
+
+### Available Scripts
+
+```bash
+npm run dev              # Start development server
+npm run build            # Build for production
+npm run start            # Run production server
+npm run lint             # Run ESLint checks
+npm run prisma:migrate   # Run database migrations
+npm run prisma:studio    # Open Prisma Studio
+npm run prisma:generate  # Generate Prisma client
+```
+
+### Code Standards
+- **Language**: TypeScript (strict mode)
+- **Formatting**: 2 spaces, single quotes, no semicolons
+- **Components**: React functional components with hooks
+- **Naming**: PascalCase for components, camelCase for utilities
+- **Linting**: ESLint with Next.js configuration
+
+---
+
+## Troubleshooting
+
+### Database Connection Issues
+```bash
+# Check connection string
+echo $DATABASE_URL
+
+# Reset database
+npx prisma migrate reset
+
+# Check Prisma Studio
+npm run prisma:studio
+```
+
+### API Integration Failures
+1. Verify all API tokens in `.env.local`
+2. Check integration status: **Settings** → **Integrations**
+3. Review connection logs in dashboard
+4. Contact platform admin for credential reset
+
+### Port Already in Use
+```bash
+# Use alternative port
+npm run dev -- -p 3001
+```
+
+---
+
+## Support & Documentation
+
+- **Getting Started**: [SETUP.md](SETUP.md) - Complete installation guide
+- **API Reference**: [API_REFERENCE.md](API_REFERENCE.md) - Endpoint documentation
+- **Development**: [Development guide](DEVELOPMENT.md) - For developers extending the platform
 
 ---
 
 ## License
 
-Proprietary - JQuality Platform 2026
+Internal use only. All rights reserved.
 
-## 📚 API Routes (Phase 1)
+---
 
-- `POST /api/auth/login` - User authentication
-- `POST /api/auth/register` - User registration
-- `POST /api/scenarios/generate` - Generate test scenarios from Jira
-- `GET /api/scenarios` - Retrieve saved scenarios
-- `POST /api/scenarios/save` - Save generated scenarios
+**Questions?** Contact your technical team or platform admin.
 
-## 🛣️ Development Roadmap
-
-### Phase 1: Foundation & Database Migration ✅ (In Progress)
-- [x] Next.js 14 setup with Tailwind + ShadcnUI
-- [x] Prisma ORM with PostgreSQL schema
-- [x] Authentication (JWT + Role-based access)
-- [x] Scenario generation API migration
-- [ ] Frontend dashboard rebuild
-
-### Phase 2: Sprint & History Engine (3-4 weeks)
-- Jira Sprint listener (webhook/polling)
-- Semantic search with Gemini Pro
-- Historical ticket search + Confluence page reading
-- DevInsight entity for PR analysis
-
-### Phase 3: Deploy Trigger & QA Review Hub (3-4 weeks)
-- CI/CD webhook integration
-- Staging deployment confirmation logic
-- QA Hub dashboard with test evidence attachment
-- Documentation draft review UI
-- Confluence publishing workflow
-
-### Post-Phase 3: Optimization
-- Automated test script generation (Cypress/Playwright)
-- Gross Lead Time reporting & traceability dashboards
-- Multi-org/multi-repo support
-
-## 🔐 Authentication & Authorization
-
-Role-based access control (RBAC):
-- **QA**: Create/review/publish documentation, execute tests
-- **Developer**: Read-only access to tickets and insights
-- **DevOps**: Manage deployments and webhooks
-- **Admin**: Full system access
-
-## 🔧 Environment Variables
-
-See `.env.example` for all required configuration variables.
-
-## 📖 Documentation
-
-- [Architecture Design](./docs/architecture.md) (Coming soon)
-- [API Reference](./docs/api.md) (Coming soon)
-- [Database Schema](./docs/schema.md) (Coming soon)
-
-## 🤝 Contributing
-
-This is a focused, enterprise project. For significant changes, please discuss with the core team first.
-
-## 📝 License
-
-Internal use only.
-
+Last updated: January 28, 2026

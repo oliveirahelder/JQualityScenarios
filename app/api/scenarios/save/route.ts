@@ -1,18 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
+import { withAuth } from '@/lib/middleware'
 import { prisma } from '@/lib/prisma'
 
-export async function POST(req: NextRequest) {
+export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
+    const payload = req.user
 
     const {
       ticketId,
@@ -52,4 +44,4 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     )
   }
-}
+})

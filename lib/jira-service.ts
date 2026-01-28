@@ -161,6 +161,9 @@ Use acceptance criteria if present in description or comments; if impacts/risks 
 Do not invent features (no sorting/filtering/layout tests unless explicitly mentioned).
 Test scenarios must align with the ticket request and any comments from dev/product.
 Focus on realistic QA manual testing steps. Use clear and concise action/verification steps.
+Manual scenarios must be specific to this ticket (use domain terms, thresholds, and rules from the description/comments).
+Always return 4-8 manual scenarios (do not leave manual empty).
+Gherkin scenarios must be 1:1 with manual scenarios.
 Return ONLY valid JSON in this exact shape:
 {
   "manual": [
@@ -196,6 +199,8 @@ Please generate test scenarios for this ticket.`
     const response = await client.chat.completions.create({
       model: 'gpt-4o-mini',
       max_tokens: 1024,
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
       messages: [
         {
           role: 'system',
@@ -213,16 +218,218 @@ Please generate test scenarios for this ticket.`
       throw new Error('Empty response from API')
     }
 
-    const jsonMatch = content.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      return { gherkin: [content], manual: [] }
+    const normalizeString = (value: unknown) =>
+      typeof value === 'string' ? value.trim() : ''
+
+    const extractJsonObject = (raw: string) => {
+      const start = raw.indexOf('{')
+      if (start === -1) return null
+      let depth = 0
+      let inString = false
+      let escape = false
+      for (let i = start; i < raw.length; i += 1) {
+        const char = raw[i]
+        if (inString) {
+          if (escape) {
+            escape = false
+            continue
+          }
+          if (char === '\\') {
+            escape = true
+            continue
+          }
+          if (char === '"') {
+            inString = false
+          }
+          continue
+        }
+        if (char === '"') {
+          inString = true
+          continue
+        }
+        if (char === '{') {
+          depth += 1
+          continue
+        }
+        if (char === '}') {
+          depth -= 1
+          if (depth === 0) {
+            return raw.slice(start, i + 1)
+          }
+        }
+      }
+      return null
     }
-    const parsed = JSON.parse(jsonMatch[0])
-    const manual = Array.isArray(parsed.manual) ? parsed.manual : []
-    const gherkin = Array.isArray(parsed.gherkin) ? parsed.gherkin : []
-    return { gherkin, manual }
+
+    const repairJsonString = (raw: string) => {
+      let output = ''
+      let inString = false
+      let escape = false
+      for (const char of raw) {
+        if (inString) {
+          if (escape) {
+            output += char
+            escape = false
+            continue
+          }
+          if (char === '\\') {
+            output += char
+            escape = true
+            continue
+          }
+          if (char === '"') {
+            inString = false
+            output += char
+            continue
+          }
+          if (char === '\n' || char === '\r') {
+            output += '\\n'
+            continue
+          }
+          output += char
+          continue
+        }
+        if (char === '"') {
+          inString = true
+          output += char
+          continue
+        }
+        output += char
+      }
+      return output.replace(/,\\s*([}\\]])/g, '$1')
+    }
+
+    const normalizeExecutionSteps = (value: unknown): string[] => {
+      if (Array.isArray(value)) {
+        return value
+          .map((step) => (typeof step === 'string' ? step.trim() : ''))
+          .filter(Boolean)
+      }
+      if (typeof value === 'string') {
+        return value
+          .split(/\r?\n+/)
+          .map((step) => step.replace(/^\d+\.\s*/, '').trim())
+          .filter(Boolean)
+      }
+      return []
+    }
+
+    const normalizeManualScenario = (
+      input: Record<string, unknown>,
+      index: number
+    ): ManualScenario | null => {
+      const id = normalizeString(input.id) || `FT-${String(index + 1).padStart(2, '0')}`
+      const testScenario =
+        normalizeString(input.testScenario) ||
+        normalizeString(input.title) ||
+        normalizeString(input.scenario)
+      const executionSteps = normalizeExecutionSteps(
+        input.executionSteps ?? input.steps ?? input.step
+      )
+      const expectedResult =
+        normalizeString(input.expectedResult) || normalizeString(input.expected)
+      const actualResult =
+        normalizeString(input.actualResult) || normalizeString(input.actual)
+      const notes = normalizeString(input.notes) || normalizeString(input.note)
+
+      if (!testScenario && executionSteps.length === 0 && !expectedResult) {
+        return null
+      }
+
+      return {
+        id,
+        testScenario: testScenario || `Scenario ${index + 1}`,
+        executionSteps,
+        expectedResult,
+        actualResult: actualResult || undefined,
+        notes: notes || undefined,
+      }
+    }
+
+    const normalizeManualScenarios = (value: unknown): ManualScenario[] => {
+      if (!value) return []
+      if (Array.isArray(value)) {
+        return value
+          .map((entry, index) =>
+            entry && typeof entry === 'object'
+              ? normalizeManualScenario(entry as Record<string, unknown>, index)
+              : null
+          )
+          .filter((entry): entry is ManualScenario => Boolean(entry))
+      }
+      if (value && typeof value === 'object') {
+        if (Array.isArray((value as Record<string, unknown>).scenarios)) {
+          return normalizeManualScenarios((value as Record<string, unknown>).scenarios)
+        }
+        const single = normalizeManualScenario(value as Record<string, unknown>, 0)
+        return single ? [single] : []
+      }
+      return []
+    }
+
+    const normalizeGherkinScenarios = (value: unknown): string[] => {
+      if (!value) return []
+      if (Array.isArray(value)) {
+        return value
+          .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+          .filter(Boolean)
+      }
+      if (typeof value === 'string') {
+        return value.trim() ? [value.trim()] : []
+      }
+      if (value && typeof value === 'object') {
+        const nested = (value as Record<string, unknown>).scenarios
+        return normalizeGherkinScenarios(nested)
+      }
+      return []
+    }
+
+    const parseScenariosFromContent = (raw: string): GeneratedScenarios | null => {
+      const candidate = extractJsonObject(raw) || raw.trim()
+      if (!candidate) return null
+
+      const tryParse = (value: string): GeneratedScenarios | null => {
+        const parsed = JSON.parse(value) as Record<string, unknown>
+        const manual = normalizeManualScenarios(
+          parsed.manual ?? parsed.manualScenarios ?? parsed.testCases
+        )
+        const gherkin = normalizeGherkinScenarios(
+          parsed.gherkin ?? parsed.gherkinScenarios ?? parsed.gherkinScenariosText
+        )
+        if (manual.length === 0 && gherkin.length === 0) {
+          return null
+        }
+        return { gherkin, manual }
+      }
+
+      try {
+        return tryParse(candidate)
+      } catch (parseError) {
+        const repaired = repairJsonString(candidate)
+        if (repaired !== candidate) {
+          try {
+            return tryParse(repaired)
+          } catch (repairError) {
+            console.error('Error parsing AI JSON after repair:', repairError)
+          }
+        }
+        console.error('Error parsing AI JSON:', parseError)
+        return null
+      }
+    }
+
+    const parsed = parseScenariosFromContent(content)
+    if (parsed) {
+      return parsed
+    }
+
+    return { gherkin: [content], manual: [] }
   } catch (error) {
     console.error('Error generating scenarios with AI:', error)
-    throw new Error('Failed to generate test scenarios')
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : 'Unknown error'
+    throw new Error(`Failed to generate test scenarios: ${message}`)
   }
 }

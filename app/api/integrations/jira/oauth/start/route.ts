@@ -1,18 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import crypto from 'crypto'
-import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
+import { withAuth } from '@/lib/middleware'
 
-export async function GET(req: NextRequest) {
+export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
+    const payload = req.user
 
     const clientId = process.env.JIRA_OAUTH_CLIENT_ID
     const redirectUri = process.env.JIRA_OAUTH_REDIRECT_URI
@@ -61,4 +53,4 @@ export async function GET(req: NextRequest) {
       { status: 500 }
     )
   }
-}
+})

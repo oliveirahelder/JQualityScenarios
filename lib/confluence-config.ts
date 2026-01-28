@@ -5,6 +5,8 @@ export interface ConfluenceCredentials {
   authType: 'basic' | 'bearer'
   deployment: 'cloud' | 'datacenter'
   requestTimeout?: number
+  accessClientId?: string
+  accessClientSecret?: string
 }
 
 export function normalizeConfluenceBaseUrl(input?: string | null): string | null {
@@ -84,7 +86,11 @@ export function buildConfluenceCredentialsFromUser(
   confluenceDeployment?: string | null
   confluenceRequestTimeout?: number | null
   },
-  baseUrlOverride?: string | null
+  baseUrlOverride?: string | null,
+  accessHeaders?: {
+    clientId?: string | null
+    clientSecret?: string | null
+  }
 ): ConfluenceCredentials | null {
   const authType = user.confluenceAuthType === 'basic' ? 'basic' : 'bearer'
   const deployment = user.confluenceDeployment === 'cloud' ? 'cloud' : 'datacenter'
@@ -105,5 +111,7 @@ export function buildConfluenceCredentialsFromUser(
     authType,
     deployment,
     requestTimeout: user.confluenceRequestTimeout ?? undefined,
+    accessClientId: accessHeaders?.clientId?.trim() || undefined,
+    accessClientSecret: accessHeaders?.clientSecret?.trim() || undefined,
   }
 }

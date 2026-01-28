@@ -1,18 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
+import { withAuth } from '@/lib/middleware'
 
-export async function GET(req: NextRequest) {
+export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
+    const payload = req.user
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -45,19 +37,11 @@ export async function GET(req: NextRequest) {
       { status: 500 }
     )
   }
-}
+})
 
-export async function PUT(req: NextRequest) {
+export const PUT = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
+    const payload = req.user
     const isAdmin = ['ADMIN', 'DEVOPS'].includes(payload.role)
 
     const user = await prisma.user.findUnique({
@@ -165,7 +149,7 @@ export async function PUT(req: NextRequest) {
       { status: 500 }
     )
   }
-}
+})
 
 function extractBoardIdFromUrl(value: string): string | null {
   if (!value) return null

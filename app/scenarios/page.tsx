@@ -156,6 +156,10 @@ export default function GenerateScenariosPage() {
     try {
       const token = localStorage.getItem('token')
       const content = buildDocumentationContent(result)
+      const themeTitle =
+        result.ticketRef?.summary?.trim() ||
+        result.jiraDetails.summary?.trim() ||
+        result.jiraDetails.id
       const requirements = [
         result.jiraDetails.description,
         result.jiraDetails.comments ? `Comments:\n${result.jiraDetails.comments}` : null,
@@ -171,7 +175,7 @@ export default function GenerateScenariosPage() {
         body: JSON.stringify({
           sprintId: result.ticketRef.sprintId,
           ticketId: result.ticketRef.id,
-          title: `${result.jiraDetails.id} - QA Scenarios`,
+          title: themeTitle,
           content,
           requirements,
           technicalNotes: buildGherkinContent(result.scenarios),
@@ -291,14 +295,6 @@ export default function GenerateScenariosPage() {
                       <p className="text-xs text-slate-400 font-semibold uppercase mb-2">Summary</p>
                       <p className="text-white text-base">{result.jiraDetails.summary}</p>
                     </div>
-                    {result.jiraDetails.description && (
-                      <div className="mt-6">
-                        <p className="text-xs text-slate-400 font-semibold uppercase mb-2">Description</p>
-                        <div className="text-white text-sm p-4 bg-slate-800/30 rounded-lg border border-slate-700/30">
-                          {result.jiraDetails.description}
-                        </div>
-                      </div>
-                    )}
                   </CardContent>
                 </Card>
 

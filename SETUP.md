@@ -1,357 +1,416 @@
-# Setup Guide - JQuality
+# Installation & Setup Guide
 
-**Complete installation in 30 minutes.**
+Complete setup of JQuality Platform from scratch in **20-30 minutes**.
 
 ---
 
 ## Prerequisites
 
-- **Node.js 18+** - [Download](https://nodejs.org/)
-- **PostgreSQL 14+** - [Download](https://www.postgresql.org/) or Docker
-- **Git** - [Download](https://git-scm.com/)
-- API keys: Jira, GitHub, OpenAI, Gemini
+Before you start, ensure you have:
+
+- ✅ **Node.js 18+** - [Download](https://nodejs.org/)
+- ✅ **PostgreSQL 14+** - [Download](https://www.postgresql.org/) or use Docker
+- ✅ **Git** - [Download](https://git-scm.com/)
+- ✅ API Keys: Jira, GitHub, OpenAI, Gemini Pro
+- ✅ Confluence instance (optional, for documentation publishing)
+
+**Check versions**:
+```bash
+node --version    # Should be v18 or higher
+npm --version     # Should be v8 or higher
+```
 
 ---
 
-## Step 1: Install Dependencies
+## Step 1: Clone & Install (5 minutes)
 
 ```bash
+# Clone the repository
+git clone <your-repo-url>
 cd JQualityScenarios
+
+# Install dependencies
 npm install
 ```
 
-Expected: `added XXX packages` (2-3 minutes)
+Expected output: `added XXX packages in X.XXs`
 
 ---
 
-## Step 2: Setup Database
+## Step 2: Database Setup (5 minutes)
 
-### Option A: PostgreSQL Local
+Choose one option:
 
+### Option A: PostgreSQL Local (Recommended for Development)
+
+**Windows:**
 ```bash
+# Start PostgreSQL service
 net start postgresql-x64-14
+
+# Connect with psql
 psql -U postgres
+
+# In psql:
 CREATE DATABASE qabot_dev;
+CREATE USER qabot_user WITH PASSWORD 'qabot_password';
+GRANT ALL PRIVILEGES ON DATABASE qabot_dev TO qabot_user;
 \q
 ```
 
-### Option B: Docker
+**macOS:**
+```bash
+# Start PostgreSQL
+brew services start postgresql
+
+# Connect and create database
+psql postgres
+CREATE DATABASE qabot_dev;
+CREATE USER qabot_user WITH PASSWORD 'qabot_password';
+GRANT ALL PRIVILEGES ON DATABASE qabot_dev TO qabot_user;
+\q
+```
+
+### Option B: Docker (Recommended for Production)
 
 ```bash
-docker run --name qabot-db \
-  -e POSTGRES_PASSWORD=password \
-  -e POSTGRES_USER=postgres \
+docker run --name qabot-postgres \
   -e POSTGRES_DB=qabot_dev \
+  -e POSTGRES_USER=qabot_user \
+  -e POSTGRES_PASSWORD=qabot_password \
   -p 5432:5432 \
   -d postgres:14
 ```
 
-### Option C: Cloud (Neon, Supabase, AWS RDS)
+### Option C: Cloud Database (Neon, Supabase, AWS RDS)
 
-Sign up and get connection string.
+1. Sign up for a cloud provider
+2. Create a new database
+3. Copy the connection string
+4. Use it in `.env.local` below
 
 ---
 
-## Step 3: Configure Environment
+## Step 3: Environment Configuration (5 minutes)
+
+Create environment file:
 
 ```bash
 cp .env.example .env.local
 ```
 
-Edit `.env.local`:
+Edit `.env.local` with your configuration:
 
 ```bash
-# Database
-DATABASE_URL="postgresql://postgres:password@localhost:5432/qabot_dev"
+# ==================== DATABASE ====================
+DATABASE_URL="postgresql://qabot_user:qabot_password@localhost:5432/qabot_dev"
 
-# Jira
-JIRA_BASE_URL="https://your-domain.atlassian.net"
+# ==================== JIRA ====================
+JIRA_BASE_URL="https://your-company.atlassian.net"
 JIRA_USER="your-email@company.com"
-JIRA_API_TOKEN="your-token"
+JIRA_API_TOKEN="your-jira-api-token"
+JIRA_DEPLOYMENT="cloud"  # or "server"
+JIRA_AUTH_TYPE="basic"   # or "oauth"
 
-# GitHub
-GITHUB_TOKEN="ghp_xxxxx"
+# ==================== GITHUB ====================
+GITHUB_TOKEN="ghp_your-github-token"
+GITHUB_OWNER="your-org"
+GITHUB_REPO="your-repo"
 
-# Confluence
-CONFLUENCE_BASE_URL="https://your-domain.atlassian.net/wiki"
+# ==================== CONFLUENCE ====================
+CONFLUENCE_BASE_URL="https://your-company.atlassian.net/wiki"
 CONFLUENCE_USER="your-email@company.com"
-CONFLUENCE_API_TOKEN="your-token"
+CONFLUENCE_API_TOKEN="your-confluence-api-token"
 
-# AI
-OPENAI_API_KEY="sk-proj-xxxxx"
-GEMINI_API_KEY="AIzaSyxxxxx"
+# ==================== AI/LLM ====================
+OPENAI_API_KEY="sk-your-openai-api-key"
+GEMINI_API_KEY="your-gemini-api-key"
 
-# Auth
-JWT_SECRET="your-secret-min-32-chars"
-JWT_EXPIRES_IN="7d"
-NEXT_PUBLIC_API_URL="http://localhost:3000"
+# ==================== APPLICATION ====================
 NODE_ENV="development"
+PORT=3000
+NEXT_PUBLIC_API_URL="http://localhost:3000"
+
+# ==================== JWT ====================
+JWT_SECRET="your-secret-key-min-32-characters"
+JWT_EXPIRATION="7d"
 ```
 
+### Getting API Keys
+
+**Jira API Token**:
+1. Go to https://id.atlassian.com/manage/api-tokens
+2. Create a new API token
+3. Copy and save in `.env.local`
+
+**GitHub Token**:
+1. Go to https://github.com/settings/tokens
+2. Create a new token with `repo` and `workflow` scopes
+3. Copy and save in `.env.local`
+
+**OpenAI API Key**:
+1. Go to https://platform.openai.com/api-keys
+2. Create a new API key
+3. Copy and save in `.env.local`
+
+**Gemini API Key**:
+1. Go to https://makersuite.google.com/app/apikey
+2. Create a new API key
+3. Copy and save in `.env.local`
+
+**Confluence API Token**:
+1. Go to https://id.atlassian.com/manage/api-tokens
+2. Create a new API token
+3. Copy and save in `.env.local`
+
 ---
 
-## Step 4: Get API Keys
+## Step 4: Database Migration (5 minutes)
 
-### Jira
-1. https://id.atlassian.com/manage-profile/security/api-tokens
-2. Create API token
-3. Copy to `.env.local`
-
-### GitHub
-1. https://github.com/settings/tokens
-2. Create token (classic)
-3. Scopes: `repo`, `read:org`
-
-### OpenAI
-1. https://platform.openai.com/api-keys
-2. Create secret key
-
-### Gemini
-1. https://makersuite.google.com/app/apikey
-2. Create API key
-
----
-
-## Step 5: Initialize Database
+Initialize the database schema:
 
 ```bash
+# Generate Prisma client
+npx prisma generate
+
+# Run migrations
 npx prisma migrate dev --name init
+
+# (Optional) Open Prisma Studio to view data
+npm run prisma:studio
 ```
+
+Expected: Database tables created successfully ✓
 
 ---
 
-## Step 6: Start Server
+## Step 5: Start Development Server (2 minutes)
 
 ```bash
 npm run dev
 ```
 
-Expected: Opens http://localhost:3000
-
----
-
-## Step 7: Verify Setup
-
-1. Open http://localhost:3000
-2. Sign up
-3. Login
-4. Go to Sprints → Sync from Jira
-5. Should see your sprints ✅
-
----
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Database connection refused | Start PostgreSQL or Docker |
-| Invalid API token | Regenerate on provider website |
-| Port 3000 in use | `npm run dev -- -p 3001` |
-| Module not found | `rm -r node_modules && npm install` |
-
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for more.
-
----
-
-**Next: [QUICK_START.md](QUICK_START.md)**
-
-## Step 3: Environment Configuration
-
-1. **Copy environment template**
-   ```bash
-   cp .env.example .env.local
-   ```
-
-2. **Edit `.env.local`** with your credentials:
-
-   ```env
-   # Database
-   DATABASE_URL="postgresql://user:password@localhost:5432/qabot_dev"
-
-   # API Keys - Generate from respective platforms
-   JIRA_BASE_URL="https://your-domain.atlassian.net"
-   JIRA_USER="your-email@company.com"
-   JIRA_API_TOKEN="<generate from Jira Settings>"
-
-   GITHUB_TOKEN="<generate from GitHub Settings>"
-   GITHUB_BASE_URL="https://api.github.com"
-
-   CONFLUENCE_BASE_URL="https://your-domain.atlassian.net/wiki"
-   CONFLUENCE_USER="your-email@company.com"
-   CONFLUENCE_API_TOKEN="<generate from Confluence Settings>"
-
-   # AI Services
-   OPENAI_API_KEY="<generate from OpenAI platform>"
-   GEMINI_API_KEY="<generate from Google Cloud Console>"
-
-   # Authentication
-   JWT_SECRET="change-this-to-a-secure-random-string"
-   JWT_EXPIRES_IN="7d"
-
-   # Application
-   NEXT_PUBLIC_API_URL="http://localhost:3000"
-   NODE_ENV="development"
-   ```
-
-## Step 4: API Key Generation
-
-### Jira API Token
-1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
-2. Click "Create API token"
-3. Copy and paste into `.env.local`
-
-### GitHub Personal Access Token
-1. Go to https://github.com/settings/tokens
-2. Create new token with `repo`, `read:org` scopes
-3. Copy and paste into `.env.local`
-
-### Confluence API Token
-1. Same as Jira API Token (same identity management)
-
-### OpenAI API Key
-1. Go to https://platform.openai.com/api-keys
-2. Create new secret key
-3. Copy and paste into `.env.local`
-
-### Gemini API Key
-1. Go to https://console.cloud.google.com/
-2. Create a new project or select existing
-3. Enable Generative AI API
-4. Create API key in Credentials section
-5. Copy and paste into `.env.local`
-
-## Step 5: Initialize Database
-
-```bash
-# Generate Prisma client
-npm run prisma:generate
-
-# Run migrations
-npm run prisma:migrate
-
-# (Optional) Open Prisma Studio to view database
-npm run prisma:studio
+Expected output:
+```
+> next dev
+  ▲ Next.js 14.0.0
+  - Local:        http://localhost:3000
+  - Environments: .env.local
 ```
 
-## Step 6: Create Admin User
+---
 
-Open Prisma Studio (`npm run prisma:studio`) or run a quick script:
+## Step 6: Verify Installation
+
+1. Open http://localhost:3000 in your browser
+2. You should see the **Login** page
+3. If you see errors, check the troubleshooting section below
+
+---
+
+## Initial Setup in Application
+
+### 1. Create Admin User
+
+On first run, you may need to create an admin user:
 
 ```bash
-# Create admin user via API
+# In application terminal or API call
 curl -X POST http://localhost:3000/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "admin@qabot.local",
-    "password": "change-me-in-production",
-    "name": "QABOT Admin",
+    "email": "admin@company.com",
+    "password": "securepassword",
+    "name": "Admin",
     "role": "ADMIN"
   }'
 ```
 
-## Step 7: Start Development Server
+### 2. Test Integrations
+
+Go to **Settings** → **Integrations** and verify:
+- ✅ Jira Connection Status
+- ✅ GitHub Connection Status
+- ✅ Confluence Connection Status
+
+If any show "Failed", check the API keys in `.env.local`.
+
+### 3. Sync First Sprint
+
+1. Navigate to **Sprints**
+2. Click **Sync from Jira**
+3. Wait for sync to complete (usually 5-10 seconds)
+4. Verify tickets appear with risk levels
+
+---
+
+## Production Deployment
+
+### Build for Production
 
 ```bash
-npm run dev
+# Build the application
+npm run build
+
+# Start production server
+npm start
 ```
 
-The application will start at `http://localhost:3000`
+### Environment Variables for Production
 
-## Step 8: First Login
+Ensure these are set in your production environment:
 
-1. Navigate to http://localhost:3000/login
-2. Sign in with your admin credentials
-3. You'll be redirected to the dashboard
+```bash
+NODE_ENV=production
+DATABASE_URL=<production-database-url>
+JWT_SECRET=<strong-secret-key>
+OPENAI_API_KEY=<production-key>
+GEMINI_API_KEY=<production-key>
+JIRA_BASE_URL=<production-jira>
+GITHUB_TOKEN=<production-github-token>
+CONFLUENCE_BASE_URL=<production-confluence>
+```
 
-## Verify Installation
+### Database Backups
 
-- [ ] Database connection working: Check `.prisma/` folder created
-- [ ] API routes accessible: Visit `/api/sprints` (will return 401 if auth working)
-- [ ] Frontend loads: http://localhost:3000 shows login page
-- [ ] Authentication works: Can create account and login
-- [ ] Jira integration: Generate scenario from a real Jira ticket
+```bash
+# Backup PostgreSQL database
+pg_dump -U qabot_user qabot_dev > backup.sql
+
+# Restore from backup
+psql -U qabot_user qabot_dev < backup.sql
+```
+
+---
 
 ## Troubleshooting
 
-### Port 3000 Already in Use
-```bash
-# Kill process on port 3000 (Windows PowerShell)
-Get-Process -Id (Get-NetTCPConnection -LocalPort 3000).OwningProcess | Stop-Process
+### Issue: Database Connection Error
 
-# Or use different port
-npm run dev -- -p 3001
-```
+**Error**: `connect ECONNREFUSED 127.0.0.1:5432`
 
-### Database Connection Error
+**Solution**:
 ```bash
 # Check PostgreSQL is running
-psql -U postgres -c "SELECT version();"
+pg_isready -h localhost -p 5432
 
-# Test connection string format
-"postgresql://user:password@host:port/database"
+# If not running, start it
+net start postgresql-x64-14  # Windows
+brew services start postgresql  # macOS
+
+# Verify DATABASE_URL in .env.local is correct
+echo $DATABASE_URL
 ```
 
-### API Key Errors
-- Ensure all `.env.local` keys are set
-- Check API key permissions in respective platforms
-- Verify baseURLs match your instance URLs
+### Issue: Port 3000 Already in Use
 
-### Prisma Migration Issues
+**Error**: `Error: listen EADDRINUSE: address already in use :::3000`
+
+**Solution**:
 ```bash
-# Reset database (WARNING: deletes all data)
-npm run prisma:push -- --force-reset
+# Use alternative port
+npm run dev -- -p 3001
 
-# Or delete and recreate
-psql -U postgres
-DROP DATABASE qabot_dev;
-CREATE DATABASE qabot_dev;
+# Or kill process using port 3000
+lsof -i :3000  # macOS/Linux
+netstat -ano | findstr :3000  # Windows
+```
+
+### Issue: API Key Authentication Failures
+
+**Symptoms**: Jira/GitHub integration not working
+
+**Solution**:
+1. Double-check API keys in `.env.local`
+2. Verify keys have correct permissions:
+   - **Jira**: Read Jira Software projects, boards, sprints
+   - **GitHub**: Read repository, workflow permissions
+   - **OpenAI**: API access enabled
+3. Go to **Settings** → **Integrations** → Click **Test Connection**
+
+### Issue: npm install fails
+
+**Error**: `ERR! code ERESOLVE`
+
+**Solution**:
+```bash
+# Clear npm cache
+npm cache clean --force
+
+# Install with legacy peer deps
+npm install --legacy-peer-deps
+```
+
+### Issue: Prisma Migration Error
+
+**Error**: `Error: P3008`
+
+**Solution**:
+```bash
+# Reset database (DEV ONLY - deletes all data)
+npx prisma migrate reset
+
+# Or manually drop and recreate
+psql -U qabot_user qabot_dev
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
 \q
-npm run prisma:push
+
+npx prisma migrate dev
 ```
 
-## Project Structure
+---
 
-```
-├── app/
-│   ├── api/                    # Next.js API routes
-│   │   ├── auth/               # Authentication endpoints
-│   │   ├── sprints/            # Sprint management
-│   │   ├── tickets/            # Ticket management
-│   │   ├── scenarios/          # Scenario generation
-│   │   ├── dev-insights/       # Developer insights
-│   │   └── documentation-drafts/  # Documentation management
-│   ├── dashboard/              # Main dashboard page
-│   ├── login/                  # Login page
-│   ├── sprints/                # Sprints UI
-│   ├── scenarios/              # Scenario generation UI
-│   └── documentation/          # Documentation review UI
-├── components/
-│   └── ui/                     # ShadcnUI components
-├── lib/
-│   ├── auth.ts                 # JWT utilities
-│   ├── prisma.ts               # Prisma client
-│   ├── password.ts             # Password hashing
-│   ├── middleware.ts           # Auth middleware
-│   └── jira-service.ts         # Jira API integration
-├── prisma/
-│   ├── schema.prisma           # Data models
-│   └── migrations/             # Database migrations
-└── package.json                # Dependencies
+## Performance Tuning
+
+### Database Optimization
+
+```bash
+# Add indexes for faster queries
+npm run prisma:studio  # Open UI to analyze
+
+# Or run:
+psql qabot_dev -f optimize.sql
 ```
 
-## Next Steps (Phase 2)
+### API Response Caching
 
-- [ ] Implement Jira Sprint listener (webhook)
-- [ ] Add semantic search with Gemini Pro API
-- [ ] Build historical ticket search feature
-- [ ] Integrate Confluence page reading
+Edit `.env.local`:
+```bash
+# Cache scenarios for 1 hour
+CACHE_SCENARIOS_TTL=3600
 
-See [Phase 2 Roadmap](./PHASE_2.md) for details.
+# Cache search results for 5 minutes
+CACHE_SEARCH_TTL=300
+```
 
-## Support & Resources
+### Memory Usage
 
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Prisma Documentation](https://www.prisma.io/docs)
-- [Jira API Reference](https://developer.atlassian.com/cloud/jira/rest)
-- [GitHub API Reference](https://docs.github.com/en/rest)
-- [Confluence API Reference](https://developer.atlassian.com/cloud/confluence/rest)
+For large sprints (1000+ tickets):
+```bash
+NODE_OPTIONS="--max-old-space-size=4096" npm start
+```
+
+---
+
+## Next Steps
+
+1. ✅ **Installation Complete** - You're ready to use JQuality!
+2. 📖 Read [README.md](README.md) for feature overview
+3. 🚀 Start by syncing your first sprint from Jira
+4. 🧪 Generate test scenarios for your first ticket
+5. 📚 Review and publish documentation to Confluence
+
+---
+
+## Support
+
+- **Check logs**: `npm run dev` shows real-time logs
+- **Database issues**: Review Prisma Studio - `npm run prisma:studio`
+- **Integration issues**: Check **Settings** → **Integrations** → **Connection Status**
+
+---
+
+**Installation successful?** Great! Now explore the platform and start automating your QA process. 🎉
+
+Last updated: January 28, 2026

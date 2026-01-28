@@ -1,19 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
+import { withAuth, withRole } from '@/lib/middleware'
 import { prisma } from '@/lib/prisma'
 
 // GET all drafts for a user (with optional sprint/ticket filter)
-export async function GET(req: NextRequest) {
+export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
+    const payload = req.user
 
     const { searchParams } = new URL(req.url)
     const sprintId = searchParams.get('sprintId')
@@ -27,7 +19,11 @@ export async function GET(req: NextRequest) {
 
     const drafts = await prisma.documentationDraft.findMany({
       where,
-      include: { ticket: true, sprint: true },
+      include: {
+        ticket: true,
+        sprint: true,
+        linkedTickets: { include: { ticket: true } },
+      },
       orderBy: { createdAt: 'desc' },
     })
 
@@ -39,99 +35,141 @@ export async function GET(req: NextRequest) {
       { status: 500 }
     )
   }
-}
+})
 
 // POST create new draft
-export async function POST(req: NextRequest) {
-  try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+export const POST = withAuth(
+  withRole('QA', 'ADMIN')(async (req: NextRequest & { user?: any }) => {
+    try {
+      const payload = req.user
 
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
-
-    // Only QA and ADMIN can create drafts
-    if (!['QA', 'ADMIN'].includes(payload.role)) {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
-    }
-
-    const {
-      sprintId,
-      ticketId,
-      title,
-      content,
-      requirements,
-      technicalNotes,
-      testResults,
-    } = await req.json()
-
-    if (!sprintId || !ticketId || !title || !content) {
-      return NextResponse.json(
-        { error: 'sprintId, ticketId, title, and content are required' },
-        { status: 400 }
-      )
-    }
-
-    // Verify sprint and ticket exist
-    const sprint = await prisma.sprint.findUnique({
-      where: { id: sprintId },
-    })
-
-    if (!sprint) {
-      return NextResponse.json({ error: 'Sprint not found' }, { status: 404 })
-    }
-
-    const ticket = await prisma.ticket.findUnique({
-      where: { id: ticketId },
-    })
-
-    if (!ticket) {
-      return NextResponse.json({ error: 'Ticket not found' }, { status: 404 })
-    }
-
-    // Upsert draft by ticketId so scenarios can be re-saved
-    const existingDraft = await prisma.documentationDraft.findUnique({
-      where: { ticketId },
-    })
-
-    if (existingDraft) {
-      const draft = await prisma.documentationDraft.update({
-        where: { ticketId },
-        data: {
-          title,
-          content,
-          requirements,
-          technicalNotes,
-          testResults,
-        },
-      })
-      return NextResponse.json({ draft, updated: true }, { status: 200 })
-    }
-
-    const draft = await prisma.documentationDraft.create({
-      data: {
+      const {
         sprintId,
         ticketId,
-        userId: payload.userId,
         title,
         content,
         requirements,
         technicalNotes,
         testResults,
-        status: 'DRAFT',
-      },
-    })
+      } = await req.json()
 
-    return NextResponse.json({ draft, updated: false }, { status: 201 })
-  } catch (error) {
-    console.error('Error creating draft:', error)
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    )
-  }
-}
+      if (!sprintId || !ticketId || !title || !content) {
+        return NextResponse.json(
+          { error: 'sprintId, ticketId, title, and content are required' },
+          { status: 400 }
+        )
+      }
+
+      // Verify sprint and ticket exist
+      const sprint = await prisma.sprint.findUnique({
+        where: { id: sprintId },
+      })
+
+      if (!sprint) {
+        return NextResponse.json({ error: 'Sprint not found' }, { status: 404 })
+      }
+
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+      })
+
+      if (!ticket) {
+        return NextResponse.json({ error: 'Ticket not found' }, { status: 404 })
+      }
+
+      // Upsert draft by ticketId so scenarios can be re-saved
+      const existingDraft = await prisma.documentationDraft.findUnique({
+        where: { ticketId },
+      })
+
+      if (existingDraft) {
+        const draft = await prisma.documentationDraft.update({
+          where: { ticketId },
+          data: {
+            title,
+            content,
+            requirements,
+            technicalNotes,
+            testResults,
+          },
+          include: {
+            ticket: true,
+            sprint: true,
+            linkedTickets: { include: { ticket: true } },
+          },
+        })
+        return NextResponse.json({ draft, updated: true }, { status: 200 })
+      }
+
+      const existingDraftByTheme = await prisma.documentationDraft.findFirst({
+        where: {
+          title,
+          userId: payload.userId,
+        },
+        orderBy: { updatedAt: 'desc' },
+      })
+
+      if (existingDraftByTheme) {
+        const draft = await prisma.documentationDraft.update({
+          where: { id: existingDraftByTheme.id },
+          data: {
+            content,
+            requirements,
+            technicalNotes,
+            testResults,
+          },
+          include: {
+            ticket: true,
+            sprint: true,
+            linkedTickets: { include: { ticket: true } },
+          },
+        })
+
+        if (existingDraftByTheme.ticketId !== ticketId) {
+          await prisma.documentationDraftTicket.upsert({
+            where: {
+              documentationDraftId_ticketId: {
+                documentationDraftId: existingDraftByTheme.id,
+                ticketId,
+              },
+            },
+            update: {},
+            create: {
+              documentationDraftId: existingDraftByTheme.id,
+              ticketId,
+            },
+          })
+        }
+
+        return NextResponse.json({ draft, updated: true }, { status: 200 })
+      }
+
+      const draft = await prisma.documentationDraft.create({
+        data: {
+          sprintId,
+          ticketId,
+          userId: payload.userId,
+          title,
+          content,
+          requirements,
+          technicalNotes,
+          testResults,
+          status: 'DRAFT',
+        },
+        include: {
+          ticket: true,
+          sprint: true,
+          linkedTickets: { include: { ticket: true } },
+        },
+      })
+
+      return NextResponse.json({ draft, updated: false }, { status: 201 })
+    } catch (error) {
+      console.error('Error creating draft:', error)
+      return NextResponse.json(
+        { error: 'Internal server error' },
+        { status: 500 }
+      )
+    }
+  })
+)

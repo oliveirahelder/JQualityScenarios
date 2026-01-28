@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
+import { withAuth, withRole } from '@/lib/middleware'
 import { prisma } from '@/lib/prisma'
 
 const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
@@ -21,64 +21,52 @@ function safeParse(value: string | null) {
   }
 }
 
-export async function GET(req: NextRequest) {
-  try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+export const GET = withAuth(
+  withRole('ADMIN')(async (req: NextRequest & { user?: any }) => {
+    try {
+      const settings = await prisma.adminSettings.findFirst()
+      const sprintsPerTeamLimit =
+        typeof settings?.sprintsToSync === 'number' && Number.isFinite(settings.sprintsToSync)
+          ? Math.min(Math.max(Math.floor(settings.sprintsToSync), 1), MAX_SPRINTS_PER_TEAM_LIMIT)
+          : DEFAULT_SPRINTS_PER_TEAM_LIMIT
+      const cutoffDate = new Date(Date.UTC(2025, 11, 1))
+      const snapshots = await prisma.sprintSnapshot.findMany({
+        orderBy: { endDate: 'desc' },
+        where: { endDate: { gte: cutoffDate } },
+        take: 200,
+      })
 
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
-
-    if (payload.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-
-    const settings = await prisma.adminSettings.findFirst()
-    const sprintsPerTeamLimit =
-      typeof settings?.sprintsToSync === 'number' && Number.isFinite(settings.sprintsToSync)
-        ? Math.min(Math.max(Math.floor(settings.sprintsToSync), 1), MAX_SPRINTS_PER_TEAM_LIMIT)
-        : DEFAULT_SPRINTS_PER_TEAM_LIMIT
-    const cutoffDate = new Date(Date.UTC(2025, 11, 1))
-    const snapshots = await prisma.sprintSnapshot.findMany({
-      orderBy: { endDate: 'desc' },
-      where: { endDate: { gte: cutoffDate } },
-      take: 200,
-    })
-
-    const grouped = new Map<string, typeof snapshots>()
-    for (const snapshot of snapshots) {
-      const key = getTeamKey(snapshot.name)
-      const list = grouped.get(key) || []
-      if (list.length < sprintsPerTeamLimit) {
-        list.push(snapshot)
-        grouped.set(key, list)
+      const grouped = new Map<string, typeof snapshots>()
+      for (const snapshot of snapshots) {
+        const key = getTeamKey(snapshot.name)
+        const list = grouped.get(key) || []
+        if (list.length < sprintsPerTeamLimit) {
+          list.push(snapshot)
+          grouped.set(key, list)
+        }
       }
+
+      const result = Array.from(grouped.values())
+        .flat()
+        .sort((a, b) => b.endDate.getTime() - a.endDate.getTime())
+        .map((snapshot) => ({
+          id: snapshot.id,
+          sprintId: snapshot.sprintId,
+          jiraId: snapshot.jiraId,
+          name: snapshot.name,
+          startDate: snapshot.startDate,
+          endDate: snapshot.endDate,
+          status: snapshot.status,
+          totals: safeParse(snapshot.totals) || {},
+          assignees: safeParse(snapshot.assignees) || [],
+          deliveryTimes: safeParse(snapshot.deliveryTimes) || [],
+          ticketTimes: safeParse(snapshot.ticketTimes) || [],
+        }))
+
+      return NextResponse.json({ snapshots: result })
+    } catch (error) {
+      console.error('Error fetching sprint reports:', error)
+      return NextResponse.json({ error: 'Failed to load reports' }, { status: 500 })
     }
-
-    const result = Array.from(grouped.values())
-      .flat()
-      .sort((a, b) => b.endDate.getTime() - a.endDate.getTime())
-      .map((snapshot) => ({
-      id: snapshot.id,
-      sprintId: snapshot.sprintId,
-      jiraId: snapshot.jiraId,
-      name: snapshot.name,
-      startDate: snapshot.startDate,
-      endDate: snapshot.endDate,
-      status: snapshot.status,
-      totals: safeParse(snapshot.totals) || {},
-      assignees: safeParse(snapshot.assignees) || [],
-      deliveryTimes: safeParse(snapshot.deliveryTimes) || [],
-      ticketTimes: safeParse(snapshot.ticketTimes) || [],
-    }))
-
-    return NextResponse.json({ snapshots: result })
-  } catch (error) {
-    console.error('Error fetching sprint reports:', error)
-    return NextResponse.json({ error: 'Failed to load reports' }, { status: 500 })
-  }
-}
+  })
+)

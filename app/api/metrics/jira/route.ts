@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
+import { withAuth } from '@/lib/middleware'
 import { prisma } from '@/lib/prisma'
 import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
 import type { JiraCredentials } from '@/lib/jira-config'
@@ -193,21 +193,13 @@ async function getTicketWorkHours(
   }
 }
 
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
   try {
     const { searchParams } = new URL(request.url)
     const includeDeliveryTimes =
       searchParams.get('includeDeliveryTimes') !== '0' &&
       searchParams.get('includeDeliveryTimes') !== 'false'
-    const token = extractTokenFromHeader(request.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Missing authentication token' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
-    }
+    const payload = request.user
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -833,4 +825,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     )
   }
-}
+})

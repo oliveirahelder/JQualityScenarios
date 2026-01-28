@@ -62,6 +62,8 @@ model AdminSettings {
   confluenceParentPageId String?
   confluenceSearchCql String?
   confluenceSearchLimit Int?
+  confluenceAccessClientId String?
+  confluenceAccessClientSecret String?
   sprintsToSync    Int      @default(10)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -147,6 +149,7 @@ model Ticket {
   devInsights DevInsight[]
   testScenarios TestScenario[]
   documentationDraft DocumentationDraft?
+  documentationDraftLinks DocumentationDraftTicket[]
 
   @@map("tickets")
   @@index([sprintId])
@@ -213,6 +216,7 @@ model DocumentationDraft {
   
   ticketId  String     @unique
   ticket    Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  linkedTickets DocumentationDraftTicket[]
   
   userId    String
   user      User       @relation(fields: [userId], references: [id])
@@ -242,6 +246,19 @@ model DocumentationDraft {
   @@index([sprintId])
   @@index([ticketId])
   @@index([userId])
+}
+
+model DocumentationDraftTicket {
+  id String @id @default(cuid())
+  documentationDraftId String
+  documentationDraft DocumentationDraft @relation(fields: [documentationDraftId], references: [id], onDelete: Cascade)
+  ticketId String
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@map("documentation_draft_tickets")
+  @@unique([documentationDraftId, ticketId])
+  @@index([ticketId])
 }
 
 // Deployment model - tracks CI/CD deployments to environments

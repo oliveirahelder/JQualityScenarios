@@ -90,6 +90,10 @@ export default function SettingsPage() {
   const [adminConfluenceParentPageId, setAdminConfluenceParentPageId] = useState('')
   const [adminConfluenceSearchCql, setAdminConfluenceSearchCql] = useState('')
   const [adminConfluenceSearchLimit, setAdminConfluenceSearchLimit] = useState('10')
+  const [adminConfluenceAccessClientId, setAdminConfluenceAccessClientId] = useState('')
+  const [adminConfluenceAccessClientSecret, setAdminConfluenceAccessClientSecret] = useState('')
+  const [adminConfluenceAccessClientIdSet, setAdminConfluenceAccessClientIdSet] = useState(false)
+  const [adminConfluenceAccessClientSecretSet, setAdminConfluenceAccessClientSecretSet] = useState(false)
   const [adminSprintsToSync, setAdminSprintsToSync] = useState('10')
   const [adminSaving, setAdminSaving] = useState(false)
   const [adminError, setAdminError] = useState('')
@@ -196,6 +200,8 @@ export default function SettingsPage() {
           typeof adminData?.confluenceSearchLimit === 'number'
             ? adminData.confluenceSearchLimit.toString()
             : '10'
+        const nextAccessClientIdSet = Boolean(adminData?.confluenceAccessClientIdSet)
+        const nextAccessClientSecretSet = Boolean(adminData?.confluenceAccessClientSecretSet)
         const nextAdminSprintsToSync =
           typeof adminData?.sprintsToSync === 'number'
             ? adminData.sprintsToSync.toString()
@@ -206,6 +212,10 @@ export default function SettingsPage() {
         setAdminConfluenceParentPageId(nextAdminConfluenceParentPageId)
         setAdminConfluenceSearchCql(nextAdminConfluenceSearchCql)
         setAdminConfluenceSearchLimit(nextAdminConfluenceSearchLimit)
+        setAdminConfluenceAccessClientId('')
+        setAdminConfluenceAccessClientSecret('')
+        setAdminConfluenceAccessClientIdSet(nextAccessClientIdSet)
+        setAdminConfluenceAccessClientSecretSet(nextAccessClientSecretSet)
         setAdminSprintsToSync(nextAdminSprintsToSync)
         if (!jiraData?.baseUrl && nextAdminJiraBaseUrl) {
           setJiraSettings((prev) => ({ ...prev, baseUrl: nextAdminJiraBaseUrl }))
@@ -551,6 +561,8 @@ export default function SettingsPage() {
       const normalizedConfluenceSearchLimit = Number.isFinite(parsedConfluenceSearchLimit)
         ? parsedConfluenceSearchLimit
         : undefined
+      const normalizedAccessClientId = adminConfluenceAccessClientId.trim()
+      const normalizedAccessClientSecret = adminConfluenceAccessClientSecret.trim()
       const authToken = localStorage.getItem('token')
       const response = await fetch('/api/admin/settings', {
         method: 'PUT',
@@ -565,6 +577,8 @@ export default function SettingsPage() {
           confluenceParentPageId: adminConfluenceParentPageId,
           confluenceSearchCql: adminConfluenceSearchCql,
           confluenceSearchLimit: normalizedConfluenceSearchLimit,
+          confluenceAccessClientId: normalizedAccessClientId || undefined,
+          confluenceAccessClientSecret: normalizedAccessClientSecret || undefined,
           sprintsToSync: normalizedSprintsToSync,
         }),
       })
@@ -576,6 +590,14 @@ export default function SettingsPage() {
 
       setJiraSettings((prev) => ({ ...prev, baseUrl: adminJiraBaseUrl }))
       setConfluenceSettings((prev) => ({ ...prev, baseUrl: adminConfluenceBaseUrl }))
+      if (normalizedAccessClientId) {
+        setAdminConfluenceAccessClientIdSet(true)
+        setAdminConfluenceAccessClientId('')
+      }
+      if (normalizedAccessClientSecret) {
+        setAdminConfluenceAccessClientSecretSet(true)
+        setAdminConfluenceAccessClientSecret('')
+      }
       setAdminSuccess('Admin settings updated.')
     } catch (err) {
       setAdminError(err instanceof Error ? err.message : 'Failed to save admin settings')
@@ -1063,6 +1085,34 @@ export default function SettingsPage() {
                     onChange={(e) => setAdminConfluenceSearchLimit(e.target.value)}
                     className="bg-slate-800/50 border-slate-700"
                   />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs text-slate-400">Cloudflare Access Headers (optional)</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <Input
+                      placeholder={
+                        adminConfluenceAccessClientIdSet
+                          ? 'Client ID stored (leave blank to keep)'
+                          : 'CF Access Client ID'
+                      }
+                      value={adminConfluenceAccessClientId}
+                      onChange={(e) => setAdminConfluenceAccessClientId(e.target.value)}
+                      className="bg-slate-800/50 border-slate-700"
+                    />
+                    <Input
+                      placeholder={
+                        adminConfluenceAccessClientSecretSet
+                          ? 'Client Secret stored (leave blank to keep)'
+                          : 'CF Access Client Secret'
+                      }
+                      value={adminConfluenceAccessClientSecret}
+                      onChange={(e) => setAdminConfluenceAccessClientSecret(e.target.value)}
+                      className="bg-slate-800/50 border-slate-700"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Use these if Confluence is protected by Cloudflare Access.
+                  </p>
                 </div>
                 <p className="text-xs text-slate-500">
                   These values scope Confluence search and define the default documentation tree.

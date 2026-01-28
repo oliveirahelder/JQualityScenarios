@@ -1,21 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import axios from 'axios'
 import { prisma } from '@/lib/prisma'
-import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
+import { withAuth } from '@/lib/middleware'
 import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
 
-export async function POST(req: NextRequest) {
+export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
   let userId = ''
   try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
+    const payload = req.user
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -104,4 +96,4 @@ export async function POST(req: NextRequest) {
     console.error('[Jira Integration] Test error:', error)
     return NextResponse.json({ error: message }, { status: 500 })
   }
-}
+})

@@ -1,21 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import axios from 'axios'
 import { prisma } from '@/lib/prisma'
-import { extractTokenFromHeader, verifyToken } from '@/lib/auth'
+import { withAuth } from '@/lib/middleware'
 import { buildConfluenceCredentialsFromUser } from '@/lib/confluence-config'
 
-export async function POST(req: NextRequest) {
+export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
   let userId = ''
   try {
-    const token = extractTokenFromHeader(req.headers.get('authorization'))
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const payload = verifyToken(token)
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 })
-    }
+    const payload = req.user
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -28,7 +20,11 @@ export async function POST(req: NextRequest) {
     const adminSettings = await prisma.adminSettings.findFirst()
     const credentials = buildConfluenceCredentialsFromUser(
       user,
-      adminSettings?.confluenceBaseUrl || null
+      adminSettings?.confluenceBaseUrl || null,
+      {
+        clientId: adminSettings?.confluenceAccessClientId || null,
+        clientSecret: adminSettings?.confluenceAccessClientSecret || null,
+      }
     )
     if (!credentials) {
       return NextResponse.json(
@@ -45,14 +41,28 @@ export async function POST(req: NextRequest) {
               password: credentials.token,
             }
           : undefined,
-      headers:
-        credentials.authType === 'bearer'
+      headers: {
+        ...(credentials.authType === 'bearer'
           ? {
               Authorization: `Bearer ${credentials.token}`,
             }
-          : undefined,
+          : {}),
+        ...(credentials.accessClientId && credentials.accessClientSecret
+          ? {
+              'CF-Access-Client-Id': credentials.accessClientId,
+              'CF-Access-Client-Secret': credentials.accessClientSecret,
+            }
+          : {}),
+      },
       timeout: credentials.requestTimeout || 30000,
     })
+
+    if (
+      typeof response.data === 'string' &&
+      response.headers?.['content-type']?.includes('text/html')
+    ) {
+      throw new Error('Cloudflare Access blocked Confluence API requests.')
+    }
 
     await prisma.user.update({
       where: { id: user.id },
@@ -97,4 +107,4 @@ export async function POST(req: NextRequest) {
     console.error('[Confluence Integration] Test error:', error)
     return NextResponse.json({ error: message }, { status: 500 })
   }
-}
+})
