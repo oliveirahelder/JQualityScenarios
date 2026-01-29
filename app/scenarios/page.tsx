@@ -199,7 +199,7 @@ export default function GenerateScenariosPage() {
 
   return (
     <main className="min-h-screen pb-12">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-none w-full px-6 lg:px-10 py-8">
         {/* Header */}
         <div className="mb-8 animate-fadeIn">
           <h1 className="text-4xl font-bold text-white">Generate Test Scenarios</h1>

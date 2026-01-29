@@ -493,6 +493,15 @@ export default function SprintsPage() {
   }, [sprints])
 
   const teamKeys = useMemo(() => Array.from(sprintsByTeam.keys()).sort(), [sprintsByTeam])
+  const sprintSummary = useMemo(() => {
+    const activeCount = sprints.filter(isActiveSprint).length
+    const completedCount = sprints.filter(isCompletedSprint).length
+    return {
+      total: sprints.length,
+      active: activeCount,
+      completed: completedCount,
+    }
+  }, [sprints, isActiveSprint, isCompletedSprint])
 
   const toggleSprint = (sprintId: string) => {
     setExpandedSprints((prev) => ({
@@ -567,13 +576,24 @@ export default function SprintsPage() {
   }
 
   return (
-    <main className="min-h-screen pb-12 overflow-x-hidden">
-      <div className="max-w-none w-full px-4 sm:px-6 lg:px-8 py-8 overflow-x-hidden">
+    <main className="h-screen overflow-hidden">
+      <div className="max-w-none w-full px-4 sm:px-6 lg:px-8 py-4 overflow-hidden h-full flex flex-col min-h-0">
         {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8 animate-fadeIn">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4 animate-fadeIn shrink-0">
           <div>
             <h1 className="text-4xl font-bold text-white">Sprints Viewer</h1>
             <p className="text-slate-400 mt-1">View and track sprints from Jira</p>
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-400">
+              <span className="rounded-full border border-slate-700/50 px-3 py-1">
+                Total: <span className="text-slate-200 font-semibold">{sprintSummary.total}</span>
+              </span>
+              <span className="rounded-full border border-emerald-500/30 px-3 py-1 text-emerald-300">
+                Active: <span className="text-emerald-200 font-semibold">{sprintSummary.active}</span>
+              </span>
+              <span className="rounded-full border border-blue-500/30 px-3 py-1 text-blue-300">
+                Completed: <span className="text-blue-200 font-semibold">{sprintSummary.completed}</span>
+              </span>
+            </div>
           </div>
           <Button
             type="button"
@@ -586,6 +606,7 @@ export default function SprintsPage() {
         </div>
 
         {/* Sprints List */}
+        <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-4">
         {loading ? (
           <div className="text-center py-12">
             <div className="inline-block animate-spin">
@@ -1040,25 +1061,25 @@ export default function SprintsPage() {
 
                       {isExpanded ? (
                         <>
-                          <div className="mt-4">
+                          <div className="mt-5 rounded-xl border border-slate-700/40 bg-slate-950/40 p-3">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex flex-wrap items-center gap-2">
-                              <select
-                                value={filterBySprint[sprint.id] || 'all'}
-                                onChange={(event) =>
-                                  setFilterBySprint((prev) => ({
-                                    ...prev,
-                                    [sprint.id]: event.target.value as
-                                      | 'all'
-                                      | 'dev'
-                                      | 'qa'
-                                      | 'closed'
-                                      | 'bounce'
-                                      | 'final',
-                                  }))
-                                }
-                                className="bg-slate-900/40 border border-slate-700/50 text-slate-200 text-xs rounded-md px-2 py-1"
-                              >
+                                <select
+                                  value={filterBySprint[sprint.id] || 'all'}
+                                  onChange={(event) =>
+                                    setFilterBySprint((prev) => ({
+                                      ...prev,
+                                      [sprint.id]: event.target.value as
+                                        | 'all'
+                                        | 'dev'
+                                        | 'qa'
+                                        | 'closed'
+                                        | 'bounce'
+                                        | 'final',
+                                    }))
+                                  }
+                                  className="bg-slate-900/70 border border-slate-700/50 text-slate-200 text-xs rounded-md px-2 py-1"
+                                >
                                 <option value="all">All tickets</option>
                                 <option value="dev">In Dev only</option>
                                 <option value="qa">In QA only</option>
@@ -1066,19 +1087,19 @@ export default function SprintsPage() {
                                 <option value="closed">Closed only</option>
                                 <option value="bounce">Bounce only</option>
                               </select>
-                              <select
-                                value={sortBySprint[sprint.id] || 'status'}
-                                onChange={(event) =>
-                                  setSortBySprint((prev) => ({
-                                    ...prev,
-                                    [sprint.id]: event.target.value as
-                                      | 'status'
-                                      | 'story'
-                                      | 'bounce',
-                                  }))
-                                }
-                                className="bg-slate-900/40 border border-slate-700/50 text-slate-200 text-xs rounded-md px-2 py-1"
-                              >
+                                <select
+                                  value={sortBySprint[sprint.id] || 'status'}
+                                  onChange={(event) =>
+                                    setSortBySprint((prev) => ({
+                                      ...prev,
+                                      [sprint.id]: event.target.value as
+                                        | 'status'
+                                        | 'story'
+                                        | 'bounce',
+                                    }))
+                                  }
+                                  className="bg-slate-900/70 border border-slate-700/50 text-slate-200 text-xs rounded-md px-2 py-1"
+                                >
                                 <option value="status">Status (A-Z)</option>
                                 <option value="story">Story Points</option>
                                 <option value="bounce">Bounce Back</option>
@@ -1120,7 +1141,7 @@ export default function SprintsPage() {
                             </div>
                           </div>
 
-                          <div className="mt-4 rounded-lg border border-slate-700/30 bg-slate-900/30 p-4">
+                          <div className="mt-4 rounded-xl border border-slate-700/30 bg-slate-900/30 p-0 max-h-[45vh] overflow-hidden">
                             {(() => {
                               const filterValue = filterBySprint[sprint.id] || 'all'
                               const filtered = (sprint.tickets || []).filter((ticket: SprintTicket) => {
@@ -1151,9 +1172,9 @@ export default function SprintsPage() {
                                 sortBySprint[sprint.id] || 'status'
                               )
                               return sorted.length ? (
-                                <div className="overflow-x-auto">
+                                <div className="max-h-[300px] overflow-auto rounded-xl">
                                   <table className="min-w-full text-left text-sm">
-                                    <thead className="text-xs uppercase text-slate-400 border-b border-slate-800/60">
+                                    <thead className="text-xs uppercase text-slate-400 border-b border-slate-800/60 sticky top-0 bg-slate-950/80 backdrop-blur">
                                       <tr>
                                         <th className="py-2 pr-4">Ticket</th>
                                         <th className="py-2 pr-4">Summary</th>
@@ -1165,7 +1186,7 @@ export default function SprintsPage() {
                                     </thead>
                                     <tbody className="divide-y divide-slate-800/60 text-slate-200">
                                       {sorted.map((ticket: SprintTicket) => (
-                                        <tr key={ticket.id} className="align-top hover:bg-slate-800/20 transition-colors">
+                                        <tr key={ticket.id} className="align-top hover:bg-slate-800/40 transition-colors">
                                           <td className="py-2 pr-4 font-mono text-slate-300">
                                             {jiraBaseUrl ? (
                                               <a
@@ -1180,8 +1201,8 @@ export default function SprintsPage() {
                                               ticket.jiraId
                                             )}
                                           </td>
-                                          <td className="py-2 pr-4 text-slate-100 max-w-[320px]">
-                                            <span className="block truncate" title={ticket.summary ?? ''}>
+                                          <td className="py-2 pr-4 text-slate-100 max-w-[360px]">
+                                            <span className="block line-clamp-2" title={ticket.summary ?? ''}>
                                               {ticket.summary}
                                             </span>
                                           </td>
@@ -1295,6 +1316,7 @@ export default function SprintsPage() {
             })}
           </div>
         )}
+        </div>
       </div>
     </main>
   )

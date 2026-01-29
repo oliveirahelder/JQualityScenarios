@@ -799,97 +799,103 @@ export default function Dashboard() {
 
   return (
     <main className="min-h-screen pb-12">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-none w-full px-6 lg:px-10 py-8">
         <div className="mb-8 animate-fadeIn">
           <h1 className="text-4xl font-bold text-white mb-2">Dashboard</h1>
           <p className="text-slate-400">Welcome back! Here&apos;s your test intelligence overview.</p>
         </div>
 
-        <div className="mb-8">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid grid-cols-12 gap-6 mb-12">
+          <div className="col-span-8 space-y-8">
             <div>
-              <h2 className="text-2xl font-bold text-white">Overview</h2>
-              <p className="text-slate-400 text-sm">Key sprint and delivery signals</p>
-            </div>
-            {isAdmin ? (
-              <div className="flex flex-col sm:items-end gap-1.5">
-                <Button
-                  size="sm"
-                  onClick={handleJiraSync}
-                  disabled={syncing}
-                  className="bg-blue-600/80 hover:bg-blue-600 text-white"
-                >
-                  {syncing ? 'Syncing...' : 'Jira Sync'}
-                </Button>
-                {syncMessage ? <div className="text-xs text-green-300">{syncMessage}</div> : null}
-                {syncError ? <div className="text-xs text-red-300">{syncError}</div> : null}
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-white">Overview</h2>
+                  <p className="text-slate-400 text-sm">Key sprint and delivery signals</p>
+                </div>
+                {isAdmin ? (
+                  <div className="flex flex-col items-end gap-1.5">
+                    <Button
+                      size="sm"
+                      onClick={handleJiraSync}
+                      disabled={syncing}
+                      className="bg-blue-600/80 hover:bg-blue-600 text-white"
+                    >
+                      {syncing ? 'Syncing...' : 'Jira Sync'}
+                    </Button>
+                    {syncMessage ? <div className="text-xs text-green-300">{syncMessage}</div> : null}
+                    {syncError ? <div className="text-xs text-red-300">{syncError}</div> : null}
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {generalMetrics.map((metric, idx) => renderMetricCard(metric, `general-${idx}`))}
-          </div>
-        </div>
+              <div className="grid grid-cols-3 gap-6">
+                {generalMetrics.map((metric, idx) => renderMetricCard(metric, `general-${idx}`))}
+              </div>
+            </div>
 
-        <div className="mb-8">
-          <div className="mb-4">
-            <h2 className="text-2xl font-bold text-white">Delivery Commitment</h2>
-            <p className="text-slate-400 text-sm">Story points allocated vs delivered per sprint</p>
-          </div>
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            {deliveryMetrics.map((metric, idx) => renderMetricCard(metric, `delivery-${idx}`))}
-          </div>
-        </div>
-
-        <div className="mb-8">
-          <div className="mb-4">
-            <h2 className="text-2xl font-bold text-white">Assignees</h2>
-            <p className="text-slate-400 text-sm">Assigned workload across active sprints</p>
-          </div>
-          {renderMetricCard(assigneesMetric, 'assignees')}
-        </div>
-
-        <div className="mb-12">
-          <div className="mb-6">
-            <h2 className="text-2xl font-bold text-white mb-2">Quick Actions</h2>
-            <p className="text-slate-400 text-sm">Get started with your workflows</p>
+            <div>
+              <div className="mb-4">
+                <h2 className="text-2xl font-bold text-white">Delivery Commitment</h2>
+                <p className="text-slate-400 text-sm">Story points allocated vs delivered per sprint</p>
+              </div>
+              <div className="grid grid-cols-2 gap-6">
+                {deliveryMetrics.map((metric, idx) => renderMetricCard(metric, `delivery-${idx}`))}
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {quickActions.map((action, idx) => {
-              const Icon = action.icon
-              return (
-                <Link key={idx} href={action.href}>
-                  <Card
-                    className={`glass-card ${action.borderColor} h-full hover:border-blue-400/50 transition-all duration-300 cursor-pointer group animate-slideInUp`}
-                    style={{ animationDelay: `${idx * 150}ms` }}
-                  >
-                    <CardHeader>
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <CardTitle className="text-lg group-hover:text-blue-400 transition-colors">
-                            {action.title}
-                          </CardTitle>
-                          <CardDescription className="text-slate-500 text-xs mt-1">
-                            {action.description}
-                          </CardDescription>
-                        </div>
-                        <Icon className="w-5 h-5 text-slate-400 group-hover:text-blue-400 transition-colors" />
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="w-full text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+          <div className="col-span-4 space-y-8">
+            <div>
+              <div className="mb-4">
+                <h2 className="text-2xl font-bold text-white">Assignees</h2>
+                <p className="text-slate-400 text-sm">Assigned workload across active sprints</p>
+              </div>
+              {renderMetricCard(assigneesMetric, 'assignees')}
+            </div>
+
+            <div>
+              <div className="mb-4">
+                <h2 className="text-2xl font-bold text-white mb-1">Quick Actions</h2>
+                <p className="text-slate-400 text-sm">Get started with your workflows</p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
+                {quickActions.map((action, idx) => {
+                  const Icon = action.icon
+                  return (
+                    <Link key={idx} href={action.href}>
+                      <Card
+                        className={`glass-card ${action.borderColor} h-full hover:border-blue-400/50 transition-all duration-300 cursor-pointer group animate-slideInUp`}
+                        style={{ animationDelay: `${idx * 150}ms` }}
                       >
-                        Explore -&gt;
-                      </Button>
-                    </CardContent>
-                  </Card>
-                </Link>
-              )
-            })}
+                        <CardHeader>
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <CardTitle className="text-lg group-hover:text-blue-400 transition-colors">
+                                {action.title}
+                              </CardTitle>
+                              <CardDescription className="text-slate-500 text-xs mt-1">
+                                {action.description}
+                              </CardDescription>
+                            </div>
+                            <Icon className="w-5 h-5 text-slate-400 group-hover:text-blue-400 transition-colors" />
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="w-full text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                          >
+                            Explore -&gt;
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
           </div>
         </div>
 
