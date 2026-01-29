@@ -86,7 +86,6 @@ export default function Navbar() {
     { href: '/sprints', label: 'Sprints', icon: 'S' },
     { href: '/scenarios', label: 'Scenarios', icon: 'C' },
     { href: '/documentation', label: 'Docs', icon: 'Docs' },
-    { href: '/search', label: 'Search', icon: 'Q' },
   ]
   const adminLinks = [
     { href: '/reports', label: 'Reports', icon: 'R' },

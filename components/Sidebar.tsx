@@ -21,7 +21,6 @@ const navLinks: NavLink[] = [
   { href: '/sprints', label: 'Sprints' },
   { href: '/scenarios', label: 'Scenarios' },
   { href: '/documentation', label: 'Docs' },
-  { href: '/search', label: 'Search' },
   { href: '/delivery-timings', label: 'Delivery individual timings' },
 ]
 

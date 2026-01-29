@@ -772,14 +772,6 @@ export default function Dashboard() {
       borderColor: 'border-blue-500/30',
     },
     {
-      title: 'Code Impact Analysis',
-      description: 'Review PR changes and impacts',
-      icon: GitBranch,
-      href: '/search',
-      color: 'from-green-500/20 to-green-600/20',
-      borderColor: 'border-green-500/30',
-    },
-    {
       title: 'Generate Scenarios',
       description: 'Create test scenarios from tickets',
       icon: Zap,
