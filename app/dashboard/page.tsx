@@ -61,6 +61,7 @@ export default function Dashboard() {
   const [selectedSprintId, setSelectedSprintId] = useState<string | null>(null)
   const [selectedActiveSprintId, setSelectedActiveSprintId] = useState<string | null>(null)
   const [selectedDevSprintId, setSelectedDevSprintId] = useState<string | null>(null)
+  const [selectedRiskSprintId, setSelectedRiskSprintId] = useState<string>('all')
   const [metricValues, setMetricValues] = useState({
     activeSprintCount: null as number | null,
     activeSprints: [] as Array<{
@@ -80,6 +81,18 @@ export default function Dashboard() {
       closedTickets: number
       finalPhaseTickets: number
       assignees: Array<{ name: string; total: number; closed: number }>
+    }>,
+    riskSignals: [] as Array<{
+      sprintId: string
+      sprintName: string
+      teamKey: string
+      jiraId: string
+      summary: string
+      status: string
+      ageDays: number
+      bounceBackCount: number
+      riskScore: number
+      reasons: string[]
     }>,
     storyPoints: {
       currentTotal: null as number | null,
@@ -148,6 +161,7 @@ export default function Dashboard() {
       setMetricValues({
         activeSprintCount: data.activeSprintCount ?? null,
         activeSprints: data.activeSprints || [],
+        riskSignals: data.riskSignals || [],
         storyPoints: {
           currentTotal: data.storyPoints?.currentTotal ?? null,
           previousTotal: data.storyPoints?.previousTotal ?? null,
@@ -499,6 +513,55 @@ export default function Dashboard() {
         label: sprint.name,
         value: `${sprint.bounceBackPercent}%`,
       })),
+    },
+    {
+      title: 'Risk Signals',
+      value: metricsLoading
+        ? '--'
+        : selectedRiskSprintId === 'all'
+        ? metricValues.riskSignals.length
+        : metricValues.riskSignals.filter((signal) => signal.sprintId === selectedRiskSprintId)
+            .length,
+      subtitle:
+        selectedRiskSprintId === 'all'
+          ? 'Across active sprints'
+          : 'Top risk tickets (Bounce ≥1 · Age ≥7d · Past due)',
+      icon: Zap,
+      color: 'from-rose-600 to-rose-500',
+      trend: metricsLoading ? '...' : '',
+      filter: (
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="text-slate-400">Sprint</span>
+          <select
+            className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+            value={selectedRiskSprintId}
+            onChange={(event) => setSelectedRiskSprintId(event.target.value || 'all')}
+          >
+            <option value="all">All active</option>
+            {metricValues.activeSprints.map((sprint) => (
+              <option key={sprint.id} value={sprint.id}>
+                {sprint.teamKey} - {sprint.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ),
+      columns: ['Ticket', 'Status', 'Signals'],
+      rows: metricValues.riskSignals
+        .filter((signal) =>
+          selectedRiskSprintId === 'all' ? true : signal.sprintId === selectedRiskSprintId
+        )
+        .map((signal) => ({
+          label: signal.jiraId || signal.summary,
+          columns: [
+            {
+              value: `${signal.jiraId}`,
+              href: `/sprints?sprintId=${signal.sprintId}&filter=active`,
+            },
+            signal.status,
+            `${signal.reasons.join(' · ')}`,
+          ],
+        })),
     },
     {
       title: 'Story Points',

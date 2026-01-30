@@ -28,11 +28,15 @@ type TicketTimeEntry = {
 }
 
 type JiraTicketLite = {
+  id?: string
   status?: string | null
   storyPoints?: number | null
   qaBounceBackCount?: number | null
   assignee?: string | null
   jiraId?: string | null
+  summary?: string | null
+  jiraCreatedAt?: Date | string | null
+  updatedAt?: Date | string | null
 }
 
 type JiraChangelogHistory = {
@@ -326,6 +330,60 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
         assignees: assigneeTotalsList,
       }
     })
+
+    const riskSignals: Array<{
+      sprintId: string
+      sprintName: string
+      teamKey: string
+      jiraId: string
+      summary: string
+      status: string
+      ageDays: number
+      bounceBackCount: number
+      riskScore: number
+      reasons: string[]
+    }> = []
+    const nowTime = now.getTime()
+    for (const sprint of activeSprints) {
+      for (const ticket of sprint.tickets || []) {
+        const status = (ticket.status || '').trim()
+        if (isStrictClosed(status)) continue
+        const createdAtRaw = ticket.jiraCreatedAt || ticket.updatedAt
+        const createdAt = createdAtRaw ? new Date(createdAtRaw) : null
+        const ageDays = createdAt ? Math.round(businessHoursBetween(createdAt, now) / 8) : 0
+        const bounceBackCount = ticket.qaBounceBackCount || 0
+        const isPastDue = sprint.endDate.getTime() < nowTime
+        const isFinalPhase = FINAL_PHASE_STATUSES.some((value) =>
+          status.toLowerCase().includes(value)
+        )
+        const reasons: string[] = []
+        if (bounceBackCount > 0) {
+          reasons.push(`Bounce x${bounceBackCount}`)
+        }
+        if (ageDays >= 7) {
+          reasons.push(`${ageDays}d active`)
+        }
+        if (isPastDue && !isFinalPhase) {
+          reasons.push('Past due')
+        }
+        if (reasons.length === 0) continue
+        const riskScore = bounceBackCount * 3 + ageDays + (isPastDue ? 5 : 0)
+        riskSignals.push({
+          sprintId: sprint.id,
+          sprintName: sprint.name,
+          teamKey: getTeamKey(sprint.name),
+          jiraId: ticket.jiraId || '',
+          summary: ticket.summary || '',
+          status: status || 'Unknown',
+          ageDays,
+          bounceBackCount,
+          riskScore,
+          reasons,
+        })
+      }
+    }
+    riskSignals.sort((a, b) => b.riskScore - a.riskScore || b.ageDays - a.ageDays)
+    const riskSignalsTop = riskSignals.slice(0, 8)
 
     const currentStoryPoints = activeSprintMetrics.reduce(
       (sum: number, sprint: { storyPointsTotal: number }) => sum + sprint.storyPointsTotal,
@@ -784,6 +842,20 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
     const responsePayload = {
       activeSprintCount: activeSprintMetrics.length,
       activeSprints: activeSprintMetrics,
+      releaseReadiness: activeSprintMetrics.map((sprint) => ({
+        id: sprint.id,
+        name: sprint.name,
+        teamKey: sprint.teamKey,
+        totalTickets: sprint.totalTickets,
+        finalPhaseTickets: sprint.finalPhaseTickets,
+        qaTickets: sprint.qaTickets,
+        devTickets: sprint.devTickets,
+        daysLeft: sprint.daysLeft,
+        readyPercent: sprint.totalTickets
+          ? Math.round((sprint.finalPhaseTickets / sprint.totalTickets) * 1000) / 10
+          : 0,
+      })),
+      riskSignals: riskSignalsTop,
       storyPoints: {
         currentTotal: currentStoryPoints,
         previousTotal: previousStoryPoints,
