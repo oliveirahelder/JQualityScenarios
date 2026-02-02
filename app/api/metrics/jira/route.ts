@@ -11,7 +11,8 @@ const QA_ACTIVE_STATUSES = ['in qa']
 const DEV_STATUSES = ['in progress', 'in development', 'in refinement']
 const END_STATUSES = [...QA_READY_STATUSES, ...CLOSED_STATUSES]
 const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
-const MAX_SPRINTS_PER_TEAM_LIMIT = 50
+const MIN_SPRINTS_PER_TEAM_LIMIT = 2
+const MAX_SPRINTS_PER_TEAM_LIMIT = 20
 
 const METRICS_CACHE_TTL_MS = 30_000
 const metricsCache = new Map<string, { timestamp: number; payload: unknown }>()
@@ -70,7 +71,10 @@ function getTeamKey(name: string) {
 
 function clampSprintsToSync(value?: number | null) {
   if (typeof value === 'number' && Number.isFinite(value)) {
-    return Math.min(Math.max(Math.floor(value), 1), MAX_SPRINTS_PER_TEAM_LIMIT)
+    return Math.min(
+      Math.max(Math.floor(value), MIN_SPRINTS_PER_TEAM_LIMIT),
+      MAX_SPRINTS_PER_TEAM_LIMIT
+    )
   }
   return DEFAULT_SPRINTS_PER_TEAM_LIMIT
 }
@@ -890,6 +894,7 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
 
     const responsePayload = {
       lastSyncAt: lastSyncSprint?.updatedAt?.toISOString() ?? null,
+      storyPointRange: sprintsToSync,
       activeSprintCount: activeSprintMetrics.length,
       activeSprints: activeSprintMetrics,
       releaseReadiness: activeSprintMetrics.map((sprint) => ({

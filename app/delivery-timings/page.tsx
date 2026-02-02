@@ -47,6 +47,7 @@ export default function DeliveryTimingsPage() {
   const [capacityAverages, setCapacityAverages] = useState<
     Array<{ name: string; avgSpPerDay: number; sprintCount: number }>
   >([])
+  const [storyPointRange, setStoryPointRange] = useState(10)
   const [selectedSprintId, setSelectedSprintId] = useState('all')
 
   useEffect(() => {
@@ -63,6 +64,7 @@ export default function DeliveryTimingsPage() {
         setDeliveryTimesBySprint(data.deliveryTimesBySprint || [])
         setTicketTimingsBySprint(data.deliveryTicketTimesBySprint || [])
         setCapacityAverages(data.capacityAverages || [])
+        setStoryPointRange(data.storyPointRange ?? 10)
       } catch {
         // Keep defaults on error
       } finally {
@@ -108,7 +110,7 @@ export default function DeliveryTimingsPage() {
             <div>
               SP/day = story points closed in sprint / sprint days (8h per business day).
             </div>
-            <div>Avg SP/day = developer average over the last 10 closed sprints.</div>
+            <div>Avg SP/day = developer average over the last {storyPointRange} closed sprints.</div>
           </div>
         </div>
 
@@ -146,7 +148,7 @@ export default function DeliveryTimingsPage() {
                 <span>Assignee</span>
                 <span>Tickets</span>
                 <span>Avg Hours</span>
-                <span>Avg SP (last 5)</span>
+                <span>Avg SP (last {storyPointRange})</span>
                 <span>Carryover</span>
               </div>
             </div>

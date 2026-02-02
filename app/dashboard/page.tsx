@@ -65,6 +65,7 @@ export default function Dashboard() {
   const [selectedRiskSprintId, setSelectedRiskSprintId] = useState<string>('all')
   const [metricValues, setMetricValues] = useState({
     lastSyncAt: null as string | null,
+    storyPointRange: 10,
     activeSprintCount: null as number | null,
     activeSprints: [] as Array<{
       id: string
@@ -175,6 +176,7 @@ export default function Dashboard() {
       const data = await response.json()
       setMetricValues({
         lastSyncAt: data.lastSyncAt ?? null,
+        storyPointRange: data.storyPointRange ?? 10,
         activeSprintCount: data.activeSprintCount ?? null,
         activeSprints: data.activeSprints || [],
         riskSignals: data.riskSignals || [],
@@ -605,7 +607,7 @@ export default function Dashboard() {
         metricValues.storyPoints.currentTotal != null
           ? metricValues.storyPoints.currentTotal
           : '--',
-      subtitle: 'Avg story points closed (last 10 sprints)',
+      subtitle: `Avg story points closed (last ${metricValues.storyPointRange} sprints)`,
       icon: BookOpen,
       color: 'from-cyan-600 to-cyan-500',
       trend:
@@ -614,7 +616,7 @@ export default function Dashboard() {
           : '',
       rows: metricValues.storyPointsByTeam.map((entry) => ({
         label: `${entry.teamKey} - ${entry.activeSprintName}`,
-        value: `${entry.averageStoryPointsClosed} SP avg (last 10)`,
+        value: `${entry.averageStoryPointsClosed} SP avg (last ${metricValues.storyPointRange})`,
       })),
     },
     {
