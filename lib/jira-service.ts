@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid'
 import axios from 'axios'
 import { parseStringPromise } from 'xml2js'
 import type { JiraCredentials } from '@/lib/jira-config'
+import { generateJsonWithOpenAI } from '@/lib/ai-client'
 
 interface JiraDetails {
   id: string
@@ -141,16 +142,7 @@ export async function generateScenariosWithAI(
   ticketDetails: JiraDetails,
   confluenceContext?: string
 ): Promise<GeneratedScenarios> {
-  const openaiKey = process.env.OPENAI_API_KEY
-
-  if (!openaiKey) {
-    throw new Error('OpenAI API key not configured')
-  }
-
   try {
-    const { OpenAI } = await import('openai')
-    const client = new OpenAI({ apiKey: openaiKey })
-
     const systemPrompt = `You are an expert QA analyst focused on manual functional testing and BDD automation.
 Generate:
 1) Manual QA test cases focused on functional validation, written for human execution.
@@ -196,27 +188,12 @@ ${confluenceContext ? `\nRelated Documentation:\n${confluenceContext}` : ''}
 
 Please generate test scenarios for this ticket.`
 
-    const response = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
-      max_tokens: 1024,
+    const content = await generateJsonWithOpenAI({
+      system: systemPrompt,
+      user: userContent,
+      maxTokens: 1024,
       temperature: 0.2,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompt,
-        },
-        {
-          role: 'user',
-          content: userContent,
-        },
-      ],
     })
-
-    const content = response.choices[0]?.message?.content?.trim() || ''
-    if (!content) {
-      throw new Error('Empty response from API')
-    }
 
     const normalizeString = (value: unknown) =>
       typeof value === 'string' ? value.trim() : ''
