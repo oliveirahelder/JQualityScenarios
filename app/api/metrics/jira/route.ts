@@ -234,6 +234,10 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
       include: { tickets: true },
       orderBy: { endDate: 'asc' },
     })) as SprintWithTickets[]
+    const lastSyncSprint = await prisma.sprint.findFirst({
+      orderBy: { updatedAt: 'desc' },
+      select: { updatedAt: true },
+    })
 
     const now = new Date()
     const activeSprintMetrics = activeSprints.map((sprint: SprintWithTickets) => {
@@ -885,6 +889,7 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
     })
 
     const responsePayload = {
+      lastSyncAt: lastSyncSprint?.updatedAt?.toISOString() ?? null,
       activeSprintCount: activeSprintMetrics.length,
       activeSprints: activeSprintMetrics,
       releaseReadiness: activeSprintMetrics.map((sprint) => ({

@@ -64,6 +64,7 @@ export default function Dashboard() {
   const [selectedDevSprintId, setSelectedDevSprintId] = useState<string | null>(null)
   const [selectedRiskSprintId, setSelectedRiskSprintId] = useState<string>('all')
   const [metricValues, setMetricValues] = useState({
+    lastSyncAt: null as string | null,
     activeSprintCount: null as number | null,
     activeSprints: [] as Array<{
       id: string
@@ -173,6 +174,7 @@ export default function Dashboard() {
       }
       const data = await response.json()
       setMetricValues({
+        lastSyncAt: data.lastSyncAt ?? null,
         activeSprintCount: data.activeSprintCount ?? null,
         activeSprints: data.activeSprints || [],
         riskSignals: data.riskSignals || [],
@@ -912,6 +914,11 @@ export default function Dashboard() {
                     >
                       {syncing ? 'Syncing...' : 'Jira Sync'}
                     </Button>
+                    {metricValues.lastSyncAt ? (
+                      <div className="text-xs text-slate-400">
+                        Last sync: {new Date(metricValues.lastSyncAt).toLocaleString()}
+                      </div>
+                    ) : null}
                     {syncMessage ? <div className="text-xs text-green-300">{syncMessage}</div> : null}
                     {syncError ? <div className="text-xs text-red-300">{syncError}</div> : null}
                   </div>
