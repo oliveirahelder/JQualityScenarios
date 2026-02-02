@@ -2,6 +2,41 @@ import { NextRequest, NextResponse } from 'next/server'
 import { withAuth, withRole } from '@/lib/middleware'
 import { prisma } from '@/lib/prisma'
 
+const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
+const MIN_SPRINTS_PER_TEAM_LIMIT = 2
+const MAX_SPRINTS_PER_TEAM_LIMIT = 20
+
+function getTeamKey(name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return 'TEAM'
+  const match = trimmed.match(/^[A-Za-z0-9]+/)
+  return match ? match[0].toUpperCase() : trimmed.toUpperCase()
+}
+
+function clampSprintsToSync(value?: number | null) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.min(
+      Math.max(Math.floor(value), MIN_SPRINTS_PER_TEAM_LIMIT),
+      MAX_SPRINTS_PER_TEAM_LIMIT
+    )
+  }
+  return DEFAULT_SPRINTS_PER_TEAM_LIMIT
+}
+
+function limitByTeam<T extends { name: string; endDate: Date }>(items: T[], limit: number) {
+  const sorted = [...items].sort((a, b) => b.endDate.getTime() - a.endDate.getTime())
+  const grouped = new Map<string, T[]>()
+  for (const item of sorted) {
+    const key = getTeamKey(item.name)
+    const list = grouped.get(key) || []
+    if (list.length < limit) {
+      list.push(item)
+      grouped.set(key, list)
+    }
+  }
+  return Array.from(grouped.values()).flat()
+}
+
 // GET all sprints
 export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
@@ -20,7 +55,6 @@ export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
           .find((value) => !Number.isNaN(value))
       : null
 
-    const cutoffDate = new Date(Date.UTC(2025, 11, 1))
     const sprints = await prisma.sprint.findMany({
       include: {
         tickets: {
@@ -32,16 +66,13 @@ export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
         documentationDrafts: true,
         snapshot: true,
       },
-      where: {
-        OR: [
-          { status: { notIn: ['COMPLETED', 'CLOSED'] } },
-          { endDate: { gte: cutoffDate } },
-        ],
-      },
-      orderBy: { startDate: 'desc' },
+      orderBy: { endDate: 'desc' },
     })
 
-    const normalizedSprints = sprints.map((sprint) => {
+    const sprintsToSync = clampSprintsToSync(adminSettings?.sprintsToSync)
+    const limitedSprints = limitByTeam(sprints, sprintsToSync)
+
+    const normalizedSprints = limitedSprints.map((sprint) => {
       let snapshotTotals = null
       if (sprint.snapshot?.totals) {
         try {
