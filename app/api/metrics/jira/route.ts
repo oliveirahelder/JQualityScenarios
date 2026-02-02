@@ -35,6 +35,7 @@ type JiraTicketLite = {
   assignee?: string | null
   jiraId?: string | null
   summary?: string | null
+  issueType?: string | null
   jiraCreatedAt?: Date | string | null
   updatedAt?: Date | string | null
 }
@@ -384,6 +385,50 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
     }
     riskSignals.sort((a, b) => b.riskScore - a.riskScore || b.ageDays - a.ageDays)
     const riskSignalsTop = riskSignals.slice(0, 8)
+
+    const openBugEntries: Array<{
+      sprintId: string
+      sprintName: string
+      teamKey: string
+      count: number
+      averageAgeDays: number
+      oldestAgeDays: number
+    }> = []
+    let openBugTotal = 0
+    let openBugAgeTotal = 0
+    let openBugOldest = 0
+    for (const sprint of activeSprints) {
+      const bugs = (sprint.tickets || []).filter((ticket) => {
+        const type = (ticket.issueType || '').toLowerCase()
+        if (!type.includes('bug')) return false
+        return !isStrictClosed(ticket.status)
+      })
+      if (bugs.length === 0) continue
+      const ages = bugs.map((ticket) => {
+        const createdAt = ticket.jiraCreatedAt ? new Date(ticket.jiraCreatedAt) : null
+        if (!createdAt) return 0
+        return Math.round(businessHoursBetween(createdAt, now) / 8)
+      })
+      const totalAge = ages.reduce((sum, value) => sum + value, 0)
+      const oldest = ages.length ? Math.max(...ages) : 0
+      openBugEntries.push({
+        sprintId: sprint.id,
+        sprintName: sprint.name,
+        teamKey: getTeamKey(sprint.name),
+        count: bugs.length,
+        averageAgeDays: bugs.length ? Math.round((totalAge / bugs.length) * 10) / 10 : 0,
+        oldestAgeDays: oldest,
+      })
+      openBugTotal += bugs.length
+      openBugAgeTotal += totalAge
+      openBugOldest = Math.max(openBugOldest, oldest)
+    }
+    const openBugMetrics = {
+      total: openBugTotal,
+      averageAgeDays: openBugTotal ? Math.round((openBugAgeTotal / openBugTotal) * 10) / 10 : 0,
+      oldestAgeDays: openBugOldest,
+      bySprint: openBugEntries.sort((a, b) => b.count - a.count || a.sprintName.localeCompare(b.sprintName)),
+    }
 
     const currentStoryPoints = activeSprintMetrics.reduce(
       (sum: number, sprint: { storyPointsTotal: number }) => sum + sprint.storyPointsTotal,
@@ -856,6 +901,7 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
           : 0,
       })),
       riskSignals: riskSignalsTop,
+      openBugs: openBugMetrics,
       storyPoints: {
         currentTotal: currentStoryPoints,
         previousTotal: previousStoryPoints,

@@ -11,6 +11,7 @@ import {
   Zap,
   CheckCircle2,
   User,
+  Bug,
 } from 'lucide-react'
 
 type MetricValueCell =
@@ -94,6 +95,19 @@ export default function Dashboard() {
       riskScore: number
       reasons: string[]
     }>,
+    openBugs: {
+      total: 0,
+      averageAgeDays: 0,
+      oldestAgeDays: 0,
+      bySprint: [] as Array<{
+        sprintId: string
+        sprintName: string
+        teamKey: string
+        count: number
+        averageAgeDays: number
+        oldestAgeDays: number
+      }>,
+    },
     storyPoints: {
       currentTotal: null as number | null,
       previousTotal: null as number | null,
@@ -162,6 +176,12 @@ export default function Dashboard() {
         activeSprintCount: data.activeSprintCount ?? null,
         activeSprints: data.activeSprints || [],
         riskSignals: data.riskSignals || [],
+        openBugs: data.openBugs || {
+          total: 0,
+          averageAgeDays: 0,
+          oldestAgeDays: 0,
+          bySprint: [],
+        },
         storyPoints: {
           currentTotal: data.storyPoints?.currentTotal ?? null,
           previousTotal: data.storyPoints?.previousTotal ?? null,
@@ -562,6 +582,20 @@ export default function Dashboard() {
             `${signal.reasons.join(' · ')}`,
           ],
         })),
+    },
+    {
+      title: 'Open Bugs',
+      value: metricsLoading ? '--' : metricValues.openBugs.total,
+      subtitle: metricsLoading
+        ? 'Open across active sprints'
+        : `${metricValues.openBugs.averageAgeDays}d avg · ${metricValues.openBugs.oldestAgeDays}d oldest`,
+      icon: Bug,
+      color: 'from-red-600 to-red-500',
+      trend: metricsLoading ? '...' : '',
+      rows: metricValues.openBugs.bySprint.map((entry) => ({
+        label: `${entry.teamKey} - ${entry.sprintName}`,
+        value: `${entry.count} open · ${entry.averageAgeDays}d avg`,
+      })),
     },
     {
       title: 'Story Points',
