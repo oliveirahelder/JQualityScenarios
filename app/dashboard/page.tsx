@@ -82,6 +82,10 @@ export default function Dashboard() {
   const [metricValues, setMetricValues] = useState({
     lastSyncAt: null as string | null,
     storyPointRange: 10,
+    rangeBounds: {
+      min: 2,
+      max: 20,
+    },
     activeSprintCount: null as number | null,
     activeSprints: [] as Array<{
       id: string
@@ -206,6 +210,7 @@ export default function Dashboard() {
       setMetricValues({
         lastSyncAt: data.lastSyncAt ?? null,
         storyPointRange: data.storyPointRange ?? 10,
+        rangeBounds: data.rangeBounds ?? { min: 2, max: 20 },
         activeSprintCount: data.activeSprintCount ?? null,
         activeSprints: data.activeSprints || [],
         riskSignals: data.riskSignals || [],
@@ -728,9 +733,20 @@ export default function Dashboard() {
     },
   ]
 
+  const minRange = Number.isFinite(metricValues.rangeBounds?.min)
+    ? metricValues.rangeBounds.min
+    : 2
+  const maxRange = Number.isFinite(metricValues.rangeBounds?.max)
+    ? metricValues.rangeBounds.max
+    : 20
+  const normalizedMinRange = Math.min(minRange, maxRange)
+  const normalizedMaxRange = Math.max(minRange, maxRange)
   const rangeOptions = Array.from(
-    new Set([5, 10, 15, 20, selectedRange].filter((value): value is number => value != null))
-  ).sort((a, b) => a - b)
+    { length: normalizedMaxRange - normalizedMinRange + 1 },
+    (_, index) => normalizedMinRange + index
+  )
+  const displayRange =
+    selectedRange ?? metricValues.storyPointRange ?? normalizedMinRange
 
 
   const renderMetricCard = (metric: MetricCard, key: string) => {
@@ -984,11 +1000,15 @@ export default function Dashboard() {
                 <span>Time range</span>
                 <select
                   className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
-                  value={selectedRange ?? 10}
+                  value={displayRange}
                   onChange={(event) => {
                     const nextRange = Number(event.target.value)
-                    setSelectedRange(nextRange)
-                    setRangeOverride(nextRange)
+                    const clampedRange = Math.min(
+                      Math.max(nextRange, normalizedMinRange),
+                      normalizedMaxRange
+                    )
+                    setSelectedRange(clampedRange)
+                    setRangeOverride(clampedRange)
                   }}
                 >
                   {rangeOptions.map((range) => (

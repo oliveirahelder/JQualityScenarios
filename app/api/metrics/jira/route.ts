@@ -914,6 +914,10 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
     const responsePayload = {
       lastSyncAt: lastSyncSprint?.updatedAt?.toISOString() ?? null,
       storyPointRange: sprintsToSync,
+      rangeBounds: {
+        min: MIN_SPRINTS_PER_TEAM_LIMIT,
+        max: MAX_SPRINTS_PER_TEAM_LIMIT,
+      },
       activeSprintCount: activeSprintMetrics.length,
       activeSprints: activeSprintMetrics,
       releaseReadiness: activeSprintMetrics.map((sprint) => ({
