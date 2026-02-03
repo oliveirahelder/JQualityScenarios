@@ -41,6 +41,9 @@ function limitByTeam<T extends { name: string; endDate: Date }>(items: T[], limi
 export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
     const payload = req.user
+    const { searchParams } = new URL(req.url)
+    const rangeParam = searchParams.get('range') ?? searchParams.get('sprintsToSync')
+    const rangeValue = rangeParam ? Number.parseInt(rangeParam, 10) : null
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -69,7 +72,9 @@ export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
       orderBy: { endDate: 'desc' },
     })
 
-    const sprintsToSync = clampSprintsToSync(adminSettings?.sprintsToSync)
+    const sprintsToSync = clampSprintsToSync(
+      Number.isFinite(rangeValue) ? rangeValue : adminSettings?.sprintsToSync
+    )
     const limitedSprints = limitByTeam(sprints, sprintsToSync)
 
     const normalizedSprints = limitedSprints.map((sprint) => {

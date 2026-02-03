@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "check-openai": "node scripts/check-openai.js",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

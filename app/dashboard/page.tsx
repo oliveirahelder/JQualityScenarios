@@ -51,6 +51,7 @@ type MetricCard = {
   columns?: string[]
   rows?: MetricRow[]
   loading?: boolean
+  size?: 'hero' | 'standard' | 'compact'
 }
 
 export default function Dashboard() {
@@ -60,9 +61,24 @@ export default function Dashboard() {
   const [syncMessage, setSyncMessage] = useState('')
   const [syncError, setSyncError] = useState('')
   const [selectedSprintId, setSelectedSprintId] = useState<string | null>(null)
-  const [selectedActiveSprintId, setSelectedActiveSprintId] = useState<string | null>(null)
-  const [selectedDevSprintId, setSelectedDevSprintId] = useState<string | null>(null)
-  const [selectedRiskSprintId, setSelectedRiskSprintId] = useState<string>('all')
+  const [selectedTeamKey, setSelectedTeamKey] = useState<string>('all')
+  const [selectedRole, setSelectedRole] = useState<'management' | 'qa' | 'product'>('management')
+  const [riskScope, setRiskScope] = useState<'selected' | 'all'>('selected')
+  const [selectedRange, setSelectedRange] = useState<number | null>(null)
+  const [rangeOverride, setRangeOverride] = useState<number | null>(null)
+  const [docsLoading, setDocsLoading] = useState(true)
+  const [documentationBySprint, setDocumentationBySprint] = useState<
+    Record<
+      string,
+      {
+        total: number
+        draft: number
+        underReview: number
+        approved: number
+        published: number
+      }
+    >
+  >({})
   const [metricValues, setMetricValues] = useState({
     lastSyncAt: null as string | null,
     storyPointRange: 10,
@@ -96,6 +112,12 @@ export default function Dashboard() {
       bounceBackCount: number
       riskScore: number
       reasons: string[]
+    }>,
+    riskSignalsTotal: 0,
+    riskSignalsTotalsBySprint: [] as Array<{
+      sprintId: string
+      teamKey: string
+      count: number
     }>,
     openBugs: {
       total: 0,
@@ -162,14 +184,21 @@ export default function Dashboard() {
       bounce: number
       inProgress: number
     }>,
+    deliveryTimes: [] as Array<unknown>,
+    deliveryTimesBySprint: [] as Array<unknown>,
   })
   const loadMetrics = useCallback(async () => {
     setMetricsLoading(true)
     try {
       const authToken = localStorage.getItem('token')
-      const response = await fetch('/api/metrics/jira?includeDeliveryTimes=0', {
-        headers: { Authorization: `Bearer ${authToken}` },
-      })
+      const rangeQuery =
+        rangeOverride != null ? `&range=${encodeURIComponent(rangeOverride)}` : ''
+      const response = await fetch(
+        `/api/metrics/jira?includeDeliveryTimes=0${rangeQuery}`,
+        {
+          headers: { Authorization: `Bearer ${authToken}` },
+        }
+      )
       if (!response.ok) {
         return
       }
@@ -180,6 +209,8 @@ export default function Dashboard() {
         activeSprintCount: data.activeSprintCount ?? null,
         activeSprints: data.activeSprints || [],
         riskSignals: data.riskSignals || [],
+        riskSignalsTotal: data.riskSignalsTotal ?? (data.riskSignals ? data.riskSignals.length : 0),
+        riskSignalsTotalsBySprint: data.riskSignalsTotalsBySprint || [],
         openBugs: data.openBugs || {
           total: 0,
           averageAgeDays: 0,
@@ -198,12 +229,51 @@ export default function Dashboard() {
         deliveryTimes: data.deliveryTimes || [],
         deliveryTimesBySprint: data.deliveryTimesBySprint || [],
       })
+      if (typeof data.storyPointRange === 'number') {
+        setSelectedRange(data.storyPointRange)
+      }
     } catch {
       // Keep defaults on error
     } finally {
       setMetricsLoading(false)
     }
-  }, [])
+  }, [rangeOverride])
+
+  const loadDocs = useCallback(async () => {
+    setDocsLoading(true)
+    try {
+      const authToken = localStorage.getItem('token')
+      const activeRange = rangeOverride ?? selectedRange
+      const rangeQuery =
+        activeRange != null ? `?range=${encodeURIComponent(activeRange)}` : ''
+      const response = await fetch(`/api/sprints${rangeQuery}`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      })
+      if (!response.ok) {
+        return
+      }
+      const data = await response.json()
+      const documentationMap: Record<
+        string,
+        {
+          total: number
+          draft: number
+          underReview: number
+          approved: number
+          published: number
+        }
+      > = {}
+      for (const sprint of data?.sprints || []) {
+        if (!sprint?.id || !sprint?.documentationStats) continue
+        documentationMap[sprint.id] = sprint.documentationStats
+      }
+      setDocumentationBySprint(documentationMap)
+    } catch {
+      // Keep defaults on error
+    } finally {
+      setDocsLoading(false)
+    }
+  }, [rangeOverride, selectedRange])
 
   useEffect(() => {
     const storedUser = localStorage.getItem('user')
@@ -222,6 +292,10 @@ export default function Dashboard() {
   useEffect(() => {
     loadMetrics()
   }, [loadMetrics])
+
+  useEffect(() => {
+    loadDocs()
+  }, [loadDocs])
 
   const handleJiraSync = async () => {
     setSyncing(true)
@@ -252,388 +326,313 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    if (metricValues.activeSprints.length === 0) return
-    if (selectedSprintId) return
-    const sorted = [...metricValues.activeSprints].sort(
-      (a, b) => b.doneTickets - a.doneTickets || a.name.localeCompare(b.name)
-    )
-    setSelectedSprintId(sorted[0]?.id || null)
-  }, [metricValues.activeSprints, selectedSprintId])
-
-  useEffect(() => {
-    if (metricValues.activeSprints.length === 0) return
-    if (selectedActiveSprintId) return
-    const sorted = [...metricValues.activeSprints].sort(
+    const activeSprints =
+      selectedTeamKey === 'all'
+        ? metricValues.activeSprints
+        : metricValues.activeSprints.filter((sprint) => sprint.teamKey === selectedTeamKey)
+    if (activeSprints.length === 0) {
+      if (selectedSprintId !== null) {
+        setSelectedSprintId(null)
+      }
+      return
+    }
+    if (selectedSprintId && activeSprints.some((sprint) => sprint.id === selectedSprintId)) {
+      return
+    }
+    const sorted = [...activeSprints].sort(
       (a, b) => a.daysLeft - b.daysLeft || a.name.localeCompare(b.name)
     )
-    setSelectedActiveSprintId(sorted[0]?.id || null)
-  }, [metricValues.activeSprints, selectedActiveSprintId])
+    setSelectedSprintId(sorted[0]?.id || null)
+  }, [metricValues.activeSprints, selectedSprintId, selectedTeamKey])
 
-  useEffect(() => {
-    if (metricValues.activeSprints.length === 0) return
-    if (selectedDevSprintId) return
-    const sorted = [...metricValues.activeSprints].sort(
-      (a, b) => b.devTickets - a.devTickets || a.name.localeCompare(b.name)
-    )
-    setSelectedDevSprintId(sorted[0]?.id || null)
-  }, [metricValues.activeSprints, selectedDevSprintId])
+  const teamKeys = Array.from(
+    new Set(metricValues.activeSprints.map((sprint) => sprint.teamKey))
+  ).sort((a, b) => a.localeCompare(b))
 
-  const totalDevTickets = metricValues.activeSprints.reduce(
-    (sum, sprint) => sum + sprint.devTickets,
-    0
-  )
-  const totalQaTickets = metricValues.activeSprints.reduce(
-    (sum, sprint) => sum + sprint.qaTickets,
-    0
-  )
-  const currentDevSprint =
-    metricValues.activeSprints.find((sprint) => sprint.id === selectedDevSprintId) ||
-    metricValues.activeSprints[0]
-  const totalTickets = metricValues.activeSprints.reduce(
+  const filteredActiveSprints =
+    selectedTeamKey === 'all'
+      ? metricValues.activeSprints
+      : metricValues.activeSprints.filter((sprint) => sprint.teamKey === selectedTeamKey)
+
+  const selectedSprint =
+    filteredActiveSprints.find((sprint) => sprint.id === selectedSprintId) ||
+    filteredActiveSprints[0] ||
+    null
+
+  const selectedComparison = selectedSprint
+    ? metricValues.finishedComparisonByTeam.find(
+        (entry) => entry.activeSprintId === selectedSprint.id
+      )
+    : null
+
+  const totalTickets = filteredActiveSprints.reduce(
     (sum, sprint) => sum + sprint.totalTickets,
     0
   )
-  const totalStoryPoints = metricValues.activeSprints.reduce(
-    (sum, sprint) => sum + sprint.storyPointsTotal,
-    0
-  )
-  const totalStoryPointsCompleted = metricValues.activeSprints.reduce(
-    (sum, sprint) => sum + sprint.storyPointsCompleted,
-    0
-  )
-  const totalBounceBackTickets = metricValues.activeSprints.reduce(
+  const totalBounceBackTickets = filteredActiveSprints.reduce(
     (sum, sprint) => sum + sprint.bounceBackTickets,
     0
   )
   const totalBounceBackPercent = totalTickets
     ? Math.round((totalBounceBackTickets / totalTickets) * 1000) / 10
     : 0
-  const activeSprintByEnd = [...metricValues.activeSprints].sort(
-    (a, b) => a.daysLeft - b.daysLeft || a.name.localeCompare(b.name)
-  )
-  const currentActiveSprint =
-    metricValues.activeSprints.find((sprint) => sprint.id === selectedActiveSprintId) ||
-    activeSprintByEnd[0]
-  const currentSprintSuccessCount = currentActiveSprint
-    ? currentActiveSprint.finalPhaseTickets
+
+  const releaseReadinessPercent = selectedSprint?.totalTickets
+    ? Math.round((selectedSprint.finalPhaseTickets / selectedSprint.totalTickets) * 1000) / 10
     : 0
-  const currentSprintSuccessPercent = currentActiveSprint?.totalTickets
-    ? Math.round((currentSprintSuccessCount / currentActiveSprint.totalTickets) * 1000) / 10
+  const sprintProgressPercent = selectedSprint?.storyPointsTotal
+    ? Math.round((selectedSprint.storyPointsCompleted / selectedSprint.storyPointsTotal) * 1000) / 10
     : 0
 
-  const selectedSprint = metricValues.activeSprints.find(
-    (sprint) => sprint.id === selectedSprintId
+  const riskSignalsFiltered = metricValues.riskSignals.filter(
+    (signal) => selectedTeamKey === 'all' || signal.teamKey === selectedTeamKey
   )
-  const selectedComparison = selectedSprint
-    ? metricValues.finishedComparisonByTeam.find(
-        (entry) => entry.activeSprintId === selectedSprint.id
+  const riskSignalsScoped =
+    selectedSprint && riskScope === 'selected'
+      ? riskSignalsFiltered.filter((signal) => signal.sprintId === selectedSprint.id)
+      : riskSignalsFiltered
+  const riskCount = (() => {
+    if (!metricValues.riskSignalsTotalsBySprint.length) {
+      return riskSignalsScoped.length
+    }
+    if (riskScope === 'selected' && selectedSprint) {
+      const entry = metricValues.riskSignalsTotalsBySprint.find(
+        (item) => item.sprintId === selectedSprint.id
       )
-    : null
-  const topContributor = selectedSprint?.assignees
-    ? [...selectedSprint.assignees].sort((a, b) => b.closed - a.closed)[0]
-    : null
-  const bottomContributor = selectedSprint?.assignees
-    ? [...selectedSprint.assignees].sort((a, b) => a.closed - b.closed)[0]
-    : null
-  const currentTicketsClosed =
-    selectedComparison?.activeClosedTickets ?? selectedSprint?.doneTickets ?? 0
-  const currentStoryPointsClosed =
-    selectedComparison?.activeStoryPointsClosed ?? selectedSprint?.storyPointsCompleted ?? 0
+      if (!entry) return 0
+      if (selectedTeamKey !== 'all' && entry.teamKey !== selectedTeamKey) {
+        return 0
+      }
+      return entry.count
+    }
+    if (selectedTeamKey === 'all') {
+      return metricValues.riskSignalsTotal || riskSignalsScoped.length
+    }
+    return metricValues.riskSignalsTotalsBySprint
+      .filter((item) => item.teamKey === selectedTeamKey)
+      .reduce((sum, item) => sum + item.count, 0)
+  })()
+  const riskLevelLabel = riskCount >= 8 ? 'High' : riskCount >= 4 ? 'Medium' : 'Low'
 
-  const generalMetrics = [
+  const openBugsScoped = metricValues.openBugs.bySprint.filter((entry) => {
+    if (selectedTeamKey !== 'all' && entry.teamKey !== selectedTeamKey) return false
+    if (selectedSprint?.id && entry.sprintId !== selectedSprint.id) return false
+    return true
+  })
+  const openBugTotal = openBugsScoped.reduce((sum, entry) => sum + entry.count, 0)
+  const openBugAverageAge = openBugTotal
+    ? Math.round(
+        (openBugsScoped.reduce((sum, entry) => sum + entry.averageAgeDays * entry.count, 0) /
+          openBugTotal) *
+          10
+      ) / 10
+    : 0
+  const openBugOldest = openBugsScoped.reduce(
+    (max, entry) => Math.max(max, entry.oldestAgeDays),
+    0
+  )
+
+  const selectedDocStats = selectedSprint?.id ? documentationBySprint[selectedSprint.id] : null
+  const docsPending = selectedDocStats
+    ? selectedDocStats.draft + selectedDocStats.underReview
+    : 0
+
+  const scopeDelta =
+    selectedSprint && selectedComparison?.previousTotalTickets != null
+      ? selectedSprint.totalTickets - selectedComparison.previousTotalTickets
+      : null
+  const scopeDeltaLabel =
+    scopeDelta != null ? `${scopeDelta >= 0 ? '+' : ''}${scopeDelta}` : '--'
+
+  const heroMetrics: MetricCard[] = [
     {
-      title: 'Sprint Delivery',
-      value: metricsLoading ? '--' : `${currentTicketsClosed} Tickets`,
-      subtitle: selectedSprint ? `Current sprint: ${selectedSprint.name}` : 'Current sprint',
+      title: 'Release Readiness',
+      value: metricsLoading ? '--' : `${releaseReadinessPercent}%`,
+      subtitle: selectedSprint
+        ? `${selectedSprint.finalPhaseTickets}/${selectedSprint.totalTickets} in final phase`
+        : 'No active sprint',
       icon: CheckCircle2,
       color: 'from-green-600 to-green-500',
-      trend: metricsLoading ? '...' : '',
-      filter: (
-        <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="text-slate-400">Sprint</span>
-          <select
-            className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
-            value={selectedSprint?.id || ''}
-            onChange={(event) => setSelectedSprintId(event.target.value || null)}
-          >
-            {metricValues.activeSprints
-              .slice()
-              .sort((a, b) => b.doneTickets - a.doneTickets || a.name.localeCompare(b.name))
-              .map((sprint) => (
-                <option key={sprint.id} value={sprint.id}>
-                  {sprint.teamKey} - {sprint.name}
-                </option>
-              ))}
-          </select>
-        </div>
-      ),
-      rows: selectedSprint
-        ? [
-            {
-              label: 'Team size',
-              value: selectedComparison?.previousSprintId
-                ? `${selectedSprint.assignees.length} devs (prev ${selectedComparison.previousTeamSize})`
-                : `${selectedSprint.assignees.length} devs`,
-            },
-            {
-              label: 'Board tickets',
-              value: selectedComparison?.previousSprintId
-                ? `${selectedSprint.totalTickets} (prev ${selectedComparison.previousTotalTickets})`
-                : `${selectedSprint.totalTickets}`,
-            },
-            {
-              label: 'Story points (total)',
-              value: selectedComparison?.previousSprintId
-                ? `${selectedSprint.storyPointsTotal} (prev ${selectedComparison.previousStoryPointsTotal})`
-                : `${selectedSprint.storyPointsTotal}`,
-            },
-            {
-              label: 'Tickets closed',
-              value: selectedComparison
-                ? `${currentTicketsClosed} (prev ${selectedComparison.previousClosedTickets})`
-                : `${currentTicketsClosed}`,
-              href: `/sprints?sprintId=${selectedSprint.id}&filter=active&closedOnly=1`,
-            },
-            {
-              label: 'Story points closed',
-              value: selectedComparison
-                ? `${currentStoryPointsClosed} (prev ${selectedComparison.previousStoryPointsClosed})`
-                : `${currentStoryPointsClosed}`,
-              href: `/sprints?sprintId=${selectedSprint.id}&filter=active&closedOnly=1`,
-            },
-            {
-              label: 'Top contributor',
-              value: topContributor ? `${topContributor.name} (${topContributor.closed} SP)` : '--',
-            },
-            {
-              label: 'Lowest contributor',
-              value: bottomContributor
-                ? `${bottomContributor.name} (${bottomContributor.closed} SP)`
-                : '--',
-            },
-            selectedComparison?.previousSprintId
-              ? {
-                  label: `Previous sprint (${selectedComparison.periodDays}d)`,
-                  value: selectedComparison.previousSprintName || 'Previous',
-                  href: `/sprints?sprintId=${selectedComparison.previousSprintId}&filter=completed&closedOnly=1`,
-                }
-              : null,
-          ].filter(Boolean)
-        : [],
+      trend: selectedSprint ? `${selectedSprint.daysLeft}d left` : '',
+      size: 'hero',
     },
     {
-      title: 'Active Sprints',
-      value: metricValues.activeSprintCount ?? '--',
-      subtitle: 'Current sprint delivery status',
+      title: 'Sprint Progress',
+      value: metricsLoading ? '--' : `${sprintProgressPercent}%`,
+      subtitle: selectedSprint
+        ? `${selectedSprint.storyPointsCompleted}/${selectedSprint.storyPointsTotal} SP closed`
+        : 'No active sprint',
       icon: BarChart3,
       color: 'from-blue-600 to-blue-500',
-      trend: metricsLoading ? '...' : '',
-      href: '/sprints?filter=active',
-      filter: (
-        <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="text-slate-400">Sprint</span>
-          <select
-            className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
-            value={currentActiveSprint?.id || ''}
-            onChange={(event) => setSelectedActiveSprintId(event.target.value || null)}
-          >
-            {activeSprintByEnd.map((sprint) => (
-              <option key={sprint.id} value={sprint.id}>
-                {sprint.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      ),
-      rows: currentActiveSprint
-        ? [
-            {
-              label: `Sprint`,
-              value: currentActiveSprint.name,
-              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active`,
-            },
-            {
-              label: 'Success rate',
-              value: `${currentSprintSuccessPercent}%`,
-              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active&finalOnly=1`,
-            },
-            {
-              label: 'Days left',
-              value: {
-                value: `${currentActiveSprint.daysLeft}d`,
-                className:
-                  currentActiveSprint.daysLeft < 0 ? 'text-red-400' : 'text-slate-100',
-              },
-              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active`,
-            },
-            {
-              label: 'Planned tickets',
-              value: `${currentActiveSprint.totalTickets}`,
-              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active`,
-            },
-            {
-              label: 'Final phase tickets',
-              value: `${currentSprintSuccessCount}`,
-              labelTitle:
-                'Final phase = Awaiting Approval, Ready for Release, In Release, Done, Closed',
-              href: `/sprints?sprintId=${currentActiveSprint.id}&filter=active&finalOnly=1`,
-            },
-          ]
-        : [],
+      trend: selectedSprint
+        ? `${selectedSprint.doneTickets}/${selectedSprint.totalTickets} tickets`
+        : '',
+      size: 'hero',
     },
     {
-      title: 'Tickets In Development',
-      value: metricsLoading
-        ? '--'
-        : currentDevSprint
-        ? `${currentDevSprint.devTickets} / ${currentDevSprint.qaTickets}`
-        : `${totalDevTickets} / ${totalQaTickets}`,
-      subtitle: currentDevSprint ? `Sprint: ${currentDevSprint.name}` : 'Dev / QA (active)',
-      icon: Zap,
-      color: 'from-purple-600 to-purple-500',
-      trend: metricsLoading ? '...' : '',
-      filter: (
-        <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="text-slate-400">Sprint</span>
-          <select
-            className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
-            value={currentDevSprint?.id || ''}
-            onChange={(event) => setSelectedDevSprintId(event.target.value || null)}
-          >
-            {metricValues.activeSprints
-              .slice()
-              .sort((a, b) => b.devTickets - a.devTickets || a.name.localeCompare(b.name))
-              .map((sprint) => (
-                <option key={sprint.id} value={sprint.id}>
-                  {sprint.teamKey} - {sprint.name}
-                </option>
-              ))}
-          </select>
-        </div>
-      ),
-      rows: currentDevSprint
-        ? [
-            {
-              label: 'In development',
-              value: `${currentDevSprint.devTickets}`,
-              href: `/sprints?sprintId=${currentDevSprint.id}&filter=active&devOnly=1`,
-            },
-            {
-              label: 'In QA',
-              value: `${currentDevSprint.qaTickets}`,
-              href: `/sprints?sprintId=${currentDevSprint.id}&filter=active&qaOnly=1`,
-            },
-          ]
-        : [],
-    },
-    {
-      title: 'Bounce-back %',
-      value: metricsLoading ? '--' : `${totalBounceBackPercent}%`,
-      subtitle: 'Tickets with returns',
-      icon: BookOpen,
-      color: 'from-orange-600 to-orange-500',
-      trend: metricsLoading ? '...' : '',
-      rows: metricValues.activeSprints.map((sprint) => ({
-        label: sprint.name,
-        value: `${sprint.bounceBackPercent}%`,
-      })),
-    },
-    {
-      title: 'Risk Signals',
-      value: metricsLoading
-        ? '--'
-        : selectedRiskSprintId === 'all'
-        ? metricValues.riskSignals.length
-        : metricValues.riskSignals.filter((signal) => signal.sprintId === selectedRiskSprintId)
-            .length,
-      subtitle:
-        selectedRiskSprintId === 'all'
-          ? 'Across active sprints'
-          : 'Top risk tickets (Bounce ≥1 · Age ≥7d · Past due)',
+      title: 'Risk Level',
+      value: metricsLoading ? '--' : riskLevelLabel,
+      subtitle: metricsLoading
+        ? 'Loading risk signals'
+        : `${riskCount} risk signals`,
       icon: Zap,
       color: 'from-rose-600 to-rose-500',
-      trend: metricsLoading ? '...' : '',
-      filter: (
-        <div className="flex items-center justify-between gap-3 text-xs">
-          <span className="text-slate-400">Sprint</span>
-          <select
-            className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
-            value={selectedRiskSprintId}
-            onChange={(event) => setSelectedRiskSprintId(event.target.value || 'all')}
-          >
-            <option value="all">All active</option>
-            {metricValues.activeSprints.map((sprint) => (
-              <option key={sprint.id} value={sprint.id}>
-                {sprint.teamKey} - {sprint.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      ),
-      columns: ['Ticket', 'Status', 'Signals'],
-      rows: metricValues.riskSignals
-        .filter((signal) =>
-          selectedRiskSprintId === 'all' ? true : signal.sprintId === selectedRiskSprintId
-        )
-        .map((signal) => ({
-          label: signal.jiraId || signal.summary,
-          columns: [
-            {
-              value: `${signal.jiraId}`,
-              href: `/sprints?sprintId=${signal.sprintId}&filter=active`,
-            },
-            signal.status,
-            `${signal.reasons.join(' · ')}`,
-          ],
-        })),
+      size: 'hero',
     },
     {
       title: 'Open Bugs',
-      value: metricsLoading ? '--' : metricValues.openBugs.total,
+      value: metricsLoading ? '--' : openBugTotal,
       subtitle: metricsLoading
-        ? 'Open across active sprints'
-        : `${metricValues.openBugs.averageAgeDays}d avg · ${metricValues.openBugs.oldestAgeDays}d oldest`,
+        ? 'Loading bug aging'
+        : `${openBugAverageAge}d avg · ${openBugOldest}d oldest`,
       icon: Bug,
       color: 'from-red-600 to-red-500',
-      trend: metricsLoading ? '...' : '',
-      rows: metricValues.openBugs.bySprint.map((entry) => ({
-        label: `${entry.teamKey} - ${entry.sprintName}`,
-        value: `${entry.count} open · ${entry.averageAgeDays}d avg`,
-      })),
-    },
-    {
-      title: 'Story Points',
-      value:
-        metricValues.storyPoints.currentTotal != null
-          ? metricValues.storyPoints.currentTotal
-          : '--',
-      subtitle: `Avg story points closed (last ${metricValues.storyPointRange} sprints)`,
-      icon: BookOpen,
-      color: 'from-cyan-600 to-cyan-500',
-      trend:
-        metricValues.storyPoints.delta != null
-          ? `${metricValues.storyPoints.delta >= 0 ? '+' : ''}${metricValues.storyPoints.delta}`
-          : '',
-      rows: metricValues.storyPointsByTeam.map((entry) => ({
-        label: `${entry.teamKey} - ${entry.activeSprintName}`,
-        value: `${entry.averageStoryPointsClosed} SP avg (last ${metricValues.storyPointRange})`,
-      })),
-    },
-    {
-      title: 'Closed + Story Points',
-      value: metricsLoading ? '--' : `${totalStoryPointsCompleted} / ${totalStoryPoints}`,
-      subtitle: 'Closed vs total (active)',
-      icon: CheckCircle2,
-      color: 'from-emerald-600 to-emerald-500',
-      trend: metricsLoading ? '...' : '',
-      rows: metricValues.activeSprints.map((sprint) => ({
-        label: sprint.name,
-        value: `${sprint.storyPointsCompleted} / ${sprint.storyPointsTotal} pts`,
-      })),
+      size: 'hero',
     },
   ]
 
-  const deliveryMetrics = metricValues.activeSprints.map((sprint, index) => ({
+  const roleMetrics: Record<'management' | 'qa' | 'product', MetricCard[]> = {
+    management: [
+      {
+        title: 'Top Blockers',
+        value: metricsLoading ? '--' : riskCount,
+        subtitle: 'Active risk signals',
+        icon: Zap,
+        color: 'from-rose-600 to-rose-500',
+        size: 'compact',
+      },
+      {
+        title: 'Delivery Confidence',
+        value: metricsLoading ? '--' : `${releaseReadinessPercent}%`,
+        subtitle: selectedSprint
+          ? `${selectedSprint.finalPhaseTickets}/${selectedSprint.totalTickets} final phase`
+          : 'No active sprint',
+        icon: CheckCircle2,
+        color: 'from-emerald-600 to-emerald-500',
+        size: 'compact',
+      },
+      {
+        title: 'Quality Trend',
+        value: metricsLoading
+          ? '--'
+          : `${selectedSprint?.bounceBackPercent ?? totalBounceBackPercent}%`,
+        subtitle: selectedSprint
+          ? `${selectedSprint.bounceBackTickets} returns`
+          : 'Across active sprints',
+        icon: BookOpen,
+        color: 'from-amber-600 to-amber-500',
+        size: 'compact',
+      },
+    ],
+    qa: [
+      {
+        title: 'In QA',
+        value: metricsLoading ? '--' : selectedSprint?.qaTickets ?? 0,
+        subtitle: selectedSprint ? `Sprint ${selectedSprint.name}` : 'No active sprint',
+        icon: Bug,
+        color: 'from-purple-600 to-purple-500',
+        size: 'compact',
+      },
+      {
+        title: 'Open Bugs',
+        value: metricsLoading ? '--' : openBugTotal,
+        subtitle: metricsLoading
+          ? 'Loading bug aging'
+          : `${openBugAverageAge}d avg · ${openBugOldest}d oldest`,
+        icon: Bug,
+        color: 'from-red-600 to-red-500',
+        size: 'compact',
+      },
+      {
+        title: 'Docs Pending',
+        value: docsLoading ? '--' : docsPending,
+        subtitle: docsLoading
+          ? 'Loading docs'
+          : selectedDocStats
+          ? `${selectedDocStats.draft} draft · ${selectedDocStats.underReview} review`
+          : 'No doc data',
+        icon: BookOpen,
+        color: 'from-orange-600 to-orange-500',
+        loading: docsLoading,
+        size: 'compact',
+      },
+    ],
+    product: [
+      {
+        title: 'Acceptance Completion',
+        value: metricsLoading ? '--' : `${releaseReadinessPercent}%`,
+        subtitle: selectedSprint
+          ? `${selectedSprint.finalPhaseTickets}/${selectedSprint.totalTickets} final phase`
+          : 'No active sprint',
+        icon: CheckCircle2,
+        color: 'from-emerald-600 to-emerald-500',
+        size: 'compact',
+      },
+      {
+        title: 'Scope Change',
+        value: metricsLoading || scopeDelta == null ? '--' : scopeDeltaLabel,
+        subtitle: selectedComparison?.previousSprintName
+          ? `vs ${selectedComparison.previousSprintName}`
+          : 'No previous sprint',
+        icon: GitBranch,
+        color: 'from-purple-600 to-purple-500',
+        size: 'compact',
+      },
+      {
+        title: 'Release Notes Draft',
+        value: docsLoading ? '--' : selectedDocStats?.draft ?? 0,
+        subtitle: docsLoading
+          ? 'Loading docs'
+          : selectedDocStats
+          ? `${selectedDocStats.underReview} in review`
+          : 'No doc data',
+        icon: BookOpen,
+        color: 'from-slate-600 to-slate-500',
+        loading: docsLoading,
+        size: 'compact',
+      },
+    ],
+  }
+
+  const riskMetric: MetricCard = {
+    title: 'Risk Signals',
+    value: metricsLoading ? '--' : riskCount,
+    subtitle:
+      riskScope === 'selected' && selectedSprint
+        ? `${selectedSprint.name} · ${riskLevelLabel} risk`
+        : 'Across active sprints',
+    icon: Zap,
+    color: 'from-rose-600 to-rose-500',
+    filter: (
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="text-slate-400">Scope</span>
+        <select
+          className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+          value={riskScope}
+          onChange={(event) =>
+            setRiskScope(event.target.value === 'all' ? 'all' : 'selected')
+          }
+        >
+          <option value="selected">Selected sprint</option>
+          <option value="all">All active</option>
+        </select>
+      </div>
+    ),
+    columns: ['Ticket', 'Status', 'Signals'],
+    rows: riskSignalsScoped.map((signal) => ({
+      label: signal.jiraId || signal.summary,
+      columns: [
+        {
+          value: `${signal.jiraId}`,
+          href: `/sprints?sprintId=${signal.sprintId}&filter=active`,
+        },
+        signal.status,
+        `${signal.reasons.join(' · ')}`,
+      ],
+    })),
+  }
+
+  const deliveryMetrics = filteredActiveSprints.map((sprint, index) => ({
     title: `Delivery Commitment - ${sprint.name}`,
     value: metricsLoading ? '--' : `${sprint.storyPointsCompleted} / ${sprint.storyPointsTotal}`,
     subtitle: 'Allocated vs delivered',
@@ -656,10 +655,10 @@ export default function Dashboard() {
     ],
   }))
 
-  const assigneesMetric = {
-    title: 'Assignees',
+  const assigneesMetric: MetricCard = {
+    title: 'Assignees Workload',
     value: metricsLoading ? '--' : metricValues.assignees.length,
-    subtitle: '',
+    subtitle: 'All active sprints',
     icon: User,
     color: 'from-slate-600 to-slate-500',
     trend: metricsLoading ? '...' : '',
@@ -688,23 +687,80 @@ export default function Dashboard() {
     })),
   }
 
+  const bounceBackMetric: MetricCard = {
+    title: 'Bounce-back',
+    value: metricsLoading
+      ? '--'
+      : `${selectedSprint?.bounceBackPercent ?? totalBounceBackPercent}%`,
+    subtitle: selectedSprint
+      ? `${selectedSprint.bounceBackTickets} returned tickets`
+      : 'Across active sprints',
+    icon: BookOpen,
+    color: 'from-orange-600 to-orange-500',
+    trend: metricsLoading ? '...' : '',
+    rows: filteredActiveSprints.map((sprint) => ({
+      label: sprint.name,
+      value: `${sprint.bounceBackPercent}%`,
+    })),
+  }
+
+  const insightRows: MetricRow[] = [
+    {
+      label: 'Days left in sprint',
+      value: selectedSprint
+        ? {
+            value: `${selectedSprint.daysLeft}d`,
+            className: selectedSprint.daysLeft < 0 ? 'text-red-300' : 'text-slate-100',
+          }
+        : '--',
+    },
+    {
+      label: 'Risk signals open',
+      value: `${riskCount}`,
+    },
+    {
+      label: 'Oldest open bug',
+      value: `${openBugOldest}d`,
+    },
+    {
+      label: 'Bounce-back rate',
+      value: `${selectedSprint?.bounceBackPercent ?? totalBounceBackPercent}%`,
+    },
+  ]
+
+  const rangeOptions = Array.from(
+    new Set([5, 10, 15, 20, selectedRange].filter((value): value is number => value != null))
+  ).sort((a, b) => a - b)
+
 
   const renderMetricCard = (metric: MetricCard, key: string) => {
     const showSkeleton = metric.loading ?? metricsLoading
+    const size = metric.size ?? 'standard'
+    const titleClassName = size === 'compact' ? 'text-xs' : 'text-sm'
+    const valueClassName =
+      size === 'hero' ? 'text-4xl' : size === 'compact' ? 'text-2xl' : 'text-3xl'
+    const cardPadding = size === 'compact' ? 'p-4' : size === 'hero' ? 'p-7' : 'p-6'
+    const iconClassName = size === 'compact' ? 'w-5 h-5' : size === 'hero' ? 'w-8 h-8' : 'w-7 h-7'
     const card = (
       <div className="glass-card rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all duration-300 animate-slideInUp h-full">
         <div className={`h-1 bg-gradient-to-r ${metric.color}`}></div>
-        <CardContent className="p-6">
+        <CardContent className={cardPadding}>
           <div className="flex items-start justify-between mb-4">
             <div>
-              <p className="text-slate-300 text-sm font-semibold mb-1">{metric.title}</p>
+              <p className={`text-slate-300 ${titleClassName} font-semibold mb-1`}>
+                {metric.title}
+              </p>
               {showSkeleton ? (
                 <div className="h-8 w-24 rounded-md bg-slate-700/60 animate-pulse"></div>
               ) : (
-                <h3 className="text-3xl font-bold text-white tracking-tight">{metric.value}</h3>
+                <h3 className={`${valueClassName} font-bold text-white tracking-tight`}>
+                  {metric.value}
+                </h3>
               )}
             </div>
-            <metric.icon className="w-7 h-7 text-slate-400 opacity-60 group-hover:opacity-100 transition-opacity" />
+            <metric.icon
+              className={`${iconClassName} text-slate-400 opacity-60 group-hover:opacity-100 transition-opacity`}
+            />
           </div>
           {metric.subtitle ? (
             <div className="flex items-center justify-between">
@@ -892,71 +948,191 @@ export default function Dashboard() {
 
   return (
     <main className="min-h-screen pb-12">
-      <div className="max-w-none w-full px-6 lg:px-10 py-8">
-        <div className="mb-8 animate-fadeIn">
-          <h1 className="text-4xl font-bold text-white mb-2">Dashboard</h1>
-          <p className="text-slate-400">Welcome back! Here&apos;s your test intelligence overview.</p>
-        </div>
-
-        <div className="grid grid-cols-12 gap-6 mb-12">
-          <div className="col-span-8 space-y-8">
+      <div className="max-w-none w-full px-6 lg:px-10 py-8 space-y-10">
+        <div className="animate-fadeIn space-y-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold text-white">Overview</h2>
-                  <p className="text-slate-400 text-sm">Key sprint and delivery signals</p>
-                </div>
-                {isAdmin ? (
-                  <div className="flex flex-col items-end gap-1.5">
-                    <Button
-                      size="sm"
-                      onClick={handleJiraSync}
-                      disabled={syncing}
-                      className="bg-blue-600/80 hover:bg-blue-600 text-white"
-                    >
-                      {syncing ? 'Syncing...' : 'Jira Sync'}
-                    </Button>
-                    {metricValues.lastSyncAt ? (
-                      <div className="text-xs text-slate-400">
-                        Last sync: {new Date(metricValues.lastSyncAt).toLocaleString()}
-                      </div>
-                    ) : null}
-                    {syncMessage ? <div className="text-xs text-green-300">{syncMessage}</div> : null}
-                    {syncError ? <div className="text-xs text-red-300">{syncError}</div> : null}
+              <h1 className="text-4xl font-bold text-white mb-2">Dashboard</h1>
+              <p className="text-slate-400">
+                Executive summary and operational signals in one place.
+              </p>
+            </div>
+            {isAdmin ? (
+              <div className="flex flex-col items-end gap-1.5">
+                <Button
+                  size="sm"
+                  onClick={handleJiraSync}
+                  disabled={syncing}
+                  className="bg-blue-600/80 hover:bg-blue-600 text-white"
+                >
+                  {syncing ? 'Syncing...' : 'Jira Sync'}
+                </Button>
+                {metricValues.lastSyncAt ? (
+                  <div className="text-xs text-slate-400">
+                    Last sync: {new Date(metricValues.lastSyncAt).toLocaleString()}
                   </div>
                 ) : null}
+                {syncMessage ? <div className="text-xs text-green-300">{syncMessage}</div> : null}
+                {syncError ? <div className="text-xs text-red-300">{syncError}</div> : null}
               </div>
-              <div className="grid grid-cols-3 gap-6">
-                {generalMetrics.map((metric, idx) => renderMetricCard(metric, `general-${idx}`))}
-              </div>
-            </div>
-
-            <div>
-              <div className="mb-4">
-                <h2 className="text-2xl font-bold text-white">Delivery Commitment</h2>
-                <p className="text-slate-400 text-sm">Story points allocated vs delivered per sprint</p>
-              </div>
-              <div className="grid grid-cols-2 gap-6">
-                {deliveryMetrics.map((metric, idx) => renderMetricCard(metric, `delivery-${idx}`))}
-              </div>
-            </div>
+            ) : null}
           </div>
 
-          <div className="col-span-4 space-y-8">
-            <div>
-              <div className="mb-4">
-                <h2 className="text-2xl font-bold text-white">Assignees</h2>
-                <p className="text-slate-400 text-sm">Assigned workload across active sprints</p>
+          <div className="glass-card rounded-xl p-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span>Time range</span>
+                <select
+                  className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+                  value={selectedRange ?? 10}
+                  onChange={(event) => {
+                    const nextRange = Number(event.target.value)
+                    setSelectedRange(nextRange)
+                    setRangeOverride(nextRange)
+                  }}
+                >
+                  {rangeOptions.map((range) => (
+                    <option key={range} value={range}>
+                      {`Last ${range} sprints`}
+                    </option>
+                  ))}
+                </select>
               </div>
+              <span className="h-4 w-px bg-slate-700/60 hidden sm:block" />
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span>Team</span>
+                <select
+                  className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+                  value={selectedTeamKey}
+                  onChange={(event) => setSelectedTeamKey(event.target.value)}
+                >
+                  <option value="all">All teams</option>
+                  {teamKeys.map((team) => (
+                    <option key={team} value={team}>
+                      {team}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <span className="h-4 w-px bg-slate-700/60 hidden sm:block" />
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span>Sprint</span>
+                <select
+                  className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+                  value={selectedSprint?.id || ''}
+                  onChange={(event) => setSelectedSprintId(event.target.value || null)}
+                >
+                  {filteredActiveSprints.length ? (
+                    filteredActiveSprints.map((sprint) => (
+                      <option key={sprint.id} value={sprint.id}>
+                        {sprint.teamKey} - {sprint.name}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No active sprints</option>
+                  )}
+                </select>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+              <span className="badge">{selectedTeamKey === 'all' ? 'All teams' : selectedTeamKey}</span>
+              <span className="badge badge-success">
+                {selectedSprint ? selectedSprint.name : 'No sprint'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <section>
+          <div className="mb-4 flex items-end justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-white">Executive Summary</h2>
+              <p className="text-slate-400 text-sm">Most important signals in 3 seconds.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+            {heroMetrics.map((metric, idx) => renderMetricCard(metric, `hero-${idx}`))}
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-white">Role Slices</h2>
+              <p className="text-slate-400 text-sm">
+                Fast context for management, QA, and product.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {[
+                { id: 'management', label: 'Management' },
+                { id: 'qa', label: 'QA' },
+                { id: 'product', label: 'Product' },
+              ].map((role) => (
+                <button
+                  key={role.id}
+                  className={`rounded-full px-4 py-1 text-xs font-semibold transition-all ${
+                    selectedRole === role.id
+                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                      : 'bg-slate-800/60 text-slate-400 border border-slate-700/40 hover:text-slate-200'
+                  }`}
+                  onClick={() =>
+                    setSelectedRole(role.id as 'management' | 'qa' | 'product')
+                  }
+                >
+                  {role.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {roleMetrics[selectedRole].map((metric, idx) =>
+              renderMetricCard(metric, `role-${selectedRole}-${idx}`)
+            )}
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-4">
+            <h2 className="text-2xl font-bold text-white">Operational Detail</h2>
+            <p className="text-slate-400 text-sm">Risk, delivery, and workload signals.</p>
+          </div>
+          <div className="grid grid-cols-12 gap-6">
+            <div className="col-span-12 xl:col-span-7">
+              {renderMetricCard(riskMetric, 'risk')}
+            </div>
+            <div className="col-span-12 xl:col-span-5 space-y-4">
+              {deliveryMetrics.length ? (
+                deliveryMetrics.map((metric, idx) =>
+                  renderMetricCard(metric, `delivery-${idx}`)
+                )
+              ) : (
+                <div className="glass-card rounded-xl p-6 text-slate-400">
+                  No active sprint data available.
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="grid grid-cols-12 gap-6">
+            <div className="col-span-12 xl:col-span-7">
               {renderMetricCard(assigneesMetric, 'assignees')}
             </div>
+            <div className="col-span-12 xl:col-span-5">
+              {renderMetricCard(bounceBackMetric, 'bounce')}
+            </div>
+          </div>
+        </section>
 
-            <div>
-              <div className="mb-4">
-                <h2 className="text-2xl font-bold text-white mb-1">Quick Actions</h2>
-                <p className="text-slate-400 text-sm">Get started with your workflows</p>
-              </div>
-
+        <section>
+          <div className="mb-4">
+            <h2 className="text-2xl font-bold text-white">Actions and Insights</h2>
+            <p className="text-slate-400 text-sm">Keep the next steps visible.</p>
+          </div>
+          <div className="grid grid-cols-12 gap-6">
+            <div className="col-span-12 xl:col-span-5">
               <div className="grid grid-cols-1 gap-4">
                 {quickActions.map((action, idx) => {
                   const Icon = action.icon
@@ -994,45 +1170,50 @@ export default function Dashboard() {
                 })}
               </div>
             </div>
-          </div>
-        </div>
-
-        <div className="mt-12 pt-12 border-t border-slate-700/30">
-          <div className="mb-6">
-            <h2 className="text-2xl font-bold text-white mb-2">Why JQuality?</h2>
-            <p className="text-slate-400 text-sm">Automate, organize, and optimize your testing workflow</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[
-              {
-                icon: BarChart3,
-                title: 'Real-time Sync',
-                description: 'Auto-sync with Jira, GitHub, and Confluence',
-              },
-              {
-                icon: Zap,
-                title: 'AI-Powered',
-                description: 'Generate test scenarios with intelligent automation',
-              },
-              {
-                icon: GitBranch,
-                title: 'Analytics',
-                description: 'Track quality metrics and team performance',
-              },
-            ].map((feature, idx) => (
-              <div
-                key={idx}
-                className="glass-card rounded-lg p-6 text-center hover:border-blue-500/50 transition-all duration-300 animate-fadeIn"
-                style={{ animationDelay: `${idx * 100}ms` }}
-              >
-                <feature.icon className="w-8 h-8 text-blue-300 mx-auto mb-4" />
-                <h3 className="font-semibold text-white mb-2">{feature.title}</h3>
-                <p className="text-slate-400 text-sm">{feature.description}</p>
+            <div className="col-span-12 xl:col-span-7">
+              <div className="glass-card rounded-xl overflow-hidden group h-full">
+                <div className="h-1 bg-gradient-to-r from-blue-600 to-blue-500"></div>
+                <CardContent className="p-6">
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <p className="text-slate-300 text-sm font-semibold mb-1">Key Insights</p>
+                      <h3 className="text-2xl font-bold text-white tracking-tight">
+                        Focus areas
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        Highlights for the selected sprint.
+                      </p>
+                    </div>
+                    <BarChart3 className="w-7 h-7 text-slate-400 opacity-60" />
+                  </div>
+                  <div className="mt-4 space-y-2 text-xs text-slate-300">
+                    {insightRows.map((row) => {
+                      if (!('value' in row)) return null
+                      const rawValue = row.value
+                      const valueContent =
+                        typeof rawValue === 'object' && rawValue !== null && 'value' in rawValue
+                          ? rawValue.value
+                          : rawValue
+                      const valueClassName =
+                        typeof rawValue === 'object' && rawValue !== null && rawValue.className
+                          ? rawValue.className
+                          : 'text-slate-100'
+                      return (
+                        <div
+                          key={row.label}
+                          className="flex items-center justify-between gap-3 rounded-lg bg-slate-900/40 px-2.5 py-1.5"
+                        >
+                          <span className="truncate">{row.label}</span>
+                          <span className={`${valueClassName} font-semibold`}>{valueContent}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </CardContent>
               </div>
-            ))}
+            </div>
           </div>
-        </div>
+        </section>
       </div>
     </main>
   )

@@ -208,6 +208,8 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
     const includeDeliveryTimes =
       searchParams.get('includeDeliveryTimes') !== '0' &&
       searchParams.get('includeDeliveryTimes') !== 'false'
+    const rangeParam = searchParams.get('range') ?? searchParams.get('sprintsToSync')
+    const rangeValue = rangeParam ? Number.parseInt(rangeParam, 10) : null
     const payload = request.user
 
     const user = await prisma.user.findUnique({
@@ -218,7 +220,9 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
     }
 
     const adminSettings = await prisma.adminSettings.findFirst()
-    const sprintsToSync = clampSprintsToSync(adminSettings?.sprintsToSync)
+    const sprintsToSync = clampSprintsToSync(
+      Number.isFinite(rangeValue) ? rangeValue : adminSettings?.sprintsToSync
+    )
     const jiraCredentials = buildJiraCredentialsFromUser(
       user,
       adminSettings?.jiraBaseUrl || null
@@ -227,7 +231,7 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
       return NextResponse.json({ error: 'Jira integration not configured' }, { status: 400 })
     }
 
-    const cacheKey = `${payload.userId}|${includeDeliveryTimes ? 'delivery' : 'lite'}`
+    const cacheKey = `${payload.userId}|${includeDeliveryTimes ? 'delivery' : 'lite'}|range:${sprintsToSync}`
     const cached = metricsCache.get(cacheKey)
     if (cached && Date.now() - cached.timestamp < METRICS_CACHE_TTL_MS) {
       return NextResponse.json(cached.payload)
@@ -393,6 +397,21 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
     }
     riskSignals.sort((a, b) => b.riskScore - a.riskScore || b.ageDays - a.ageDays)
     const riskSignalsTop = riskSignals.slice(0, 8)
+    const riskSignalsTotal = riskSignals.length
+    const riskSignalsBySprint = new Map<
+      string,
+      { sprintId: string; teamKey: string; count: number }
+    >()
+    for (const signal of riskSignals) {
+      const entry = riskSignalsBySprint.get(signal.sprintId) || {
+        sprintId: signal.sprintId,
+        teamKey: signal.teamKey,
+        count: 0,
+      }
+      entry.count += 1
+      riskSignalsBySprint.set(signal.sprintId, entry)
+    }
+    const riskSignalsTotalsBySprint = Array.from(riskSignalsBySprint.values())
 
     const openBugEntries: Array<{
       sprintId: string
@@ -911,6 +930,8 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
           : 0,
       })),
       riskSignals: riskSignalsTop,
+      riskSignalsTotal,
+      riskSignalsTotalsBySprint,
       openBugs: openBugMetrics,
       storyPoints: {
         currentTotal: currentStoryPoints,
