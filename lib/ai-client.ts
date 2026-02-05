@@ -124,7 +124,11 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
     ],
   }
   const payloadWithLimits: Record<string, unknown> = { ...basePayload }
-  if (typeof request.maxTokens === 'number' && Number.isFinite(request.maxTokens)) {
+  if (
+    typeof request.maxTokens === 'number' &&
+    Number.isFinite(request.maxTokens) &&
+    request.maxTokens > 0
+  ) {
     payloadWithLimits.max_tokens = request.maxTokens
   }
 
