@@ -75,10 +75,14 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
         [jiraDetails.description, jiraDetails.comments].filter(Boolean).join('\n')
       )
 
+      // Allow user to paste PR links in the "documentation" textarea
+      const prUrlsFromExtra = extractPullRequestUrls(confluence || '')
+
       const prUrls = Array.from(
         new Set([
           ...pullRequestsFromDb.map((pr) => pr.url).filter(Boolean),
           ...prUrlsFromTicket,
+          ...prUrlsFromExtra,
         ])
       )
 

@@ -237,7 +237,7 @@ export default function GenerateScenariosPage() {
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-300">Documentation (Optional)</label>
                     <Textarea
-                      placeholder="Paste any relevant documentation or context..."
+              placeholder="Paste any relevant documentation, context, or PR links..."
                       value={confluence}
                       onChange={(e) => setConfluence(e.target.value)}
                       disabled={loading}
