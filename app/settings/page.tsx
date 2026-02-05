@@ -260,6 +260,15 @@ export default function SettingsPage() {
           typeof adminData?.sprintsToSync === 'number'
             ? adminData.sprintsToSync.toString()
             : '10'
+        const adminTokensMask =
+          typeof adminData?.githubOrgTokens === 'string' && adminData.githubOrgTokens.trim()
+            ? adminData.githubOrgTokens
+                .split(/\r?\n+/)
+                .map((t: string) => t.trim())
+                .filter(Boolean)
+                .map((t: string) => (t.length <= 8 ? t : `${t.slice(0, 4)}…${t.slice(-4)}`))
+                .join(' | ')
+            : ''
         setAdminJiraBaseUrl(nextAdminJiraBaseUrl)
         setAdminConfluenceBaseUrl(nextAdminConfluenceBaseUrl)
         setAdminConfluenceSpaceKey(nextAdminConfluenceSpaceKey)
@@ -276,6 +285,7 @@ export default function SettingsPage() {
         setAdminAiBaseUrl(nextAdminAiBaseUrl)
         setAdminAiMaxTokens(nextAdminAiMaxTokens)
         setAdminSprintsToSync(nextAdminSprintsToSync)
+        setAdminDataGithubOrgTokensMask(adminTokensMask)
         if (!jiraData?.baseUrl && nextAdminJiraBaseUrl) {
           setJiraSettings((prev) => ({ ...prev, baseUrl: nextAdminJiraBaseUrl }))
         }
@@ -1384,7 +1394,11 @@ export default function SettingsPage() {
                   </p>
                   {adminGithubOrgTokensSet && (
                     <p className="text-[11px] text-slate-400">
-                      (Tokens armazenados; valores reais não são exibidos)
+                      Tokens armazenados:
+                      <br />
+                      <span className="font-mono text-slate-300">
+                        {adminDataGithubOrgTokensMask || '***'}
+                      </span>
                     </p>
                   )}
                 </div>
