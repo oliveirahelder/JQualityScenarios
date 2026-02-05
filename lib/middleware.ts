@@ -21,6 +21,7 @@ export function withAuth(
       const payload = verifyToken(token)
 
       if (!payload) {
+        console.warn('[Auth] Invalid or expired token')
         return NextResponse.json(
           { error: 'Invalid or expired token' },
           { status: 401 }

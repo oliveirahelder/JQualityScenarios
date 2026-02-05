@@ -6,6 +6,7 @@ import {
   extractConfluenceSpaceKey,
   normalizeConfluenceBaseUrl,
 } from '@/lib/confluence-config'
+import { backupAdminSettings } from '@/lib/settings-backup'
 
 export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
@@ -19,6 +20,8 @@ export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
       confluenceSearchLimit: settings?.confluenceSearchLimit ?? 10,
       confluenceAccessClientIdSet: Boolean(settings?.confluenceAccessClientId),
       confluenceAccessClientSecretSet: Boolean(settings?.confluenceAccessClientSecret),
+      aiBaseUrl: settings?.aiBaseUrl || '',
+      aiMaxTokens: settings?.aiMaxTokens ?? 4096,
       sprintsToSync: settings?.sprintsToSync ?? 10,
     })
   } catch (error) {
@@ -40,18 +43,28 @@ export const PUT = withAuth(
         confluenceSearchLimit,
         confluenceAccessClientId,
         confluenceAccessClientSecret,
+        aiBaseUrl,
+        aiMaxTokens,
       } = await req.json()
     const normalizedJira =
-      typeof jiraBaseUrl === 'string' ? jiraBaseUrl.trim().replace(/\/+$/, '') : undefined
-    const normalizedConfluence = normalizeConfluenceBaseUrl(confluenceBaseUrl) || undefined
+      typeof jiraBaseUrl === 'string' && jiraBaseUrl.trim()
+        ? jiraBaseUrl.trim().replace(/\/+$/, '')
+        : undefined
+    const normalizedConfluence =
+      typeof confluenceBaseUrl === 'string' && confluenceBaseUrl.trim()
+        ? normalizeConfluenceBaseUrl(confluenceBaseUrl)
+        : undefined
     const normalizedSpaceKey =
-      typeof confluenceSpaceKey === 'string'
+      typeof confluenceSpaceKey === 'string' && confluenceSpaceKey.trim()
         ? confluenceSpaceKey.trim().toUpperCase()
         : undefined
     const rawParentPageId =
       typeof confluenceParentPageId === 'string' ? confluenceParentPageId.trim() : ''
-    const normalizedParentPageId = extractConfluenceParentPageId(rawParentPageId)
-    const parentPageIdToStore = normalizedParentPageId || (rawParentPageId || null)
+    const normalizedParentPageId = rawParentPageId
+      ? extractConfluenceParentPageId(rawParentPageId)
+      : undefined
+    const parentPageIdToStore =
+      normalizedParentPageId || (rawParentPageId ? rawParentPageId : undefined)
     const derivedSpaceKey = normalizedSpaceKey || extractConfluenceSpaceKey(confluenceBaseUrl) || undefined
     let normalizedSearchCql: string | undefined
     if (typeof confluenceSearchCql === 'string') {
@@ -99,6 +112,14 @@ export const PUT = withAuth(
       confluenceAccessClientSecret.trim()
         ? confluenceAccessClientSecret.trim()
         : undefined
+    const normalizedAiBaseUrl =
+      typeof aiBaseUrl === 'string' && aiBaseUrl.trim()
+        ? aiBaseUrl.trim().replace(/\/+$/, '')
+        : undefined
+    const normalizedAiMaxTokens =
+      typeof aiMaxTokens === 'number' && Number.isFinite(aiMaxTokens)
+        ? Math.min(Math.max(Math.floor(aiMaxTokens), 256), 16384)
+        : undefined
     const normalizedSprintsToSync =
       typeof sprintsToSync === 'number' && Number.isFinite(sprintsToSync)
         ? Math.min(Math.max(Math.floor(sprintsToSync), 1), 50)
@@ -106,35 +127,56 @@ export const PUT = withAuth(
 
     const existing = await prisma.adminSettings.findFirst()
     if (existing) {
-      await prisma.adminSettings.update({
-        where: { id: existing.id },
-        data: {
-          jiraBaseUrl: normalizedJira || null,
-          confluenceBaseUrl: normalizedConfluence || null,
-          confluenceSpaceKey: derivedSpaceKey || null,
-          confluenceParentPageId: parentPageIdToStore,
-          confluenceSearchCql: normalizedSearchCql || null,
-          confluenceSearchLimit: normalizedSearchLimit ?? existing.confluenceSearchLimit,
-          ...(normalizedAccessClientId
-            ? { confluenceAccessClientId: normalizedAccessClientId }
-            : {}),
-          ...(normalizedAccessClientSecret
-            ? { confluenceAccessClientSecret: normalizedAccessClientSecret }
-            : {}),
-          sprintsToSync: normalizedSprintsToSync ?? existing.sprintsToSync,
-        },
-      })
+      const updateData: Record<string, unknown> = {}
+      if (normalizedJira !== undefined) updateData.jiraBaseUrl = normalizedJira
+      if (normalizedConfluence !== undefined) updateData.confluenceBaseUrl = normalizedConfluence
+      if (derivedSpaceKey !== undefined) updateData.confluenceSpaceKey = derivedSpaceKey
+      if (parentPageIdToStore !== undefined) {
+        updateData.confluenceParentPageId = parentPageIdToStore
+      }
+      if (normalizedSearchCql !== undefined) updateData.confluenceSearchCql = normalizedSearchCql
+      if (normalizedSearchLimit !== undefined) {
+        updateData.confluenceSearchLimit = normalizedSearchLimit
+      }
+      if (normalizedAccessClientId) updateData.confluenceAccessClientId = normalizedAccessClientId
+      if (normalizedAccessClientSecret)
+        updateData.confluenceAccessClientSecret = normalizedAccessClientSecret
+      if (normalizedAiBaseUrl !== undefined) updateData.aiBaseUrl = normalizedAiBaseUrl
+      if (normalizedAiMaxTokens !== undefined) updateData.aiMaxTokens = normalizedAiMaxTokens
+      if (normalizedSprintsToSync !== undefined) updateData.sprintsToSync = normalizedSprintsToSync
+
+      if (Object.keys(updateData).length > 0) {
+        await backupAdminSettings({
+          jiraBaseUrl: existing.jiraBaseUrl,
+          confluenceBaseUrl: existing.confluenceBaseUrl,
+          confluenceSpaceKey: existing.confluenceSpaceKey,
+          confluenceParentPageId: existing.confluenceParentPageId,
+          confluenceSearchCql: existing.confluenceSearchCql,
+          confluenceSearchLimit: existing.confluenceSearchLimit,
+          confluenceAccessClientId: existing.confluenceAccessClientId ? 'stored' : null,
+          confluenceAccessClientSecret: existing.confluenceAccessClientSecret ? 'stored' : null,
+          aiBaseUrl: existing.aiBaseUrl,
+          aiMaxTokens: existing.aiMaxTokens,
+          sprintsToSync: existing.sprintsToSync,
+        })
+        await prisma.adminSettings.update({
+          where: { id: existing.id },
+          data: updateData,
+        })
+      }
     } else {
       await prisma.adminSettings.create({
         data: {
           jiraBaseUrl: normalizedJira || null,
           confluenceBaseUrl: normalizedConfluence || null,
           confluenceSpaceKey: derivedSpaceKey || null,
-          confluenceParentPageId: parentPageIdToStore,
+          confluenceParentPageId: parentPageIdToStore || null,
           confluenceSearchCql: normalizedSearchCql || null,
           confluenceSearchLimit: normalizedSearchLimit ?? 10,
           confluenceAccessClientId: normalizedAccessClientId || null,
           confluenceAccessClientSecret: normalizedAccessClientSecret || null,
+          aiBaseUrl: normalizedAiBaseUrl || null,
+          aiMaxTokens: normalizedAiMaxTokens ?? 4096,
           sprintsToSync: normalizedSprintsToSync ?? 10,
         },
       })

@@ -4,7 +4,7 @@
   "description": "Centralized intelligence platform connecting Jira, GitHub, and Confluence for automated test scenarios and documentation",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "check-openai": "node scripts/check-openai.js",
     "build": "next build",
     "start": "next start",
@@ -15,7 +15,7 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
-    "@prisma/client": "^5.8.0",
+    "@prisma/client": "^6.19.2",
     "@radix-ui/react-dialog": "^1.1.1",
     "@radix-ui/react-dropdown-menu": "^2.0.4",
     "@radix-ui/react-label": "^2.0.1",
@@ -34,7 +34,7 @@
     "jsonwebtoken": "^9.0.0",
     "lucide-react": "^0.263.1",
     "multer": "^2.0.1",
-    "next": "^14.0.0",
+    "next": "^16.1.6",
     "next-auth": "^4.24.5",
     "openai": "^5.8.2",
     "pdf-parse": "^1.1.1",
@@ -58,7 +58,7 @@
     "@types/xml2js": "^0.4.14",
     "eslint": "^8.53.0",
     "eslint-config-next": "^14.0.0",
-    "prisma": "^5.8.0",
+    "prisma": "^6.19.2",
     "typescript": "^5.3.3"
   }
 }

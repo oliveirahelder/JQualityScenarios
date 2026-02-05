@@ -13,6 +13,7 @@ const END_STATUSES = [...QA_READY_STATUSES, ...CLOSED_STATUSES]
 const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
 const MIN_SPRINTS_PER_TEAM_LIMIT = 2
 const MAX_SPRINTS_PER_TEAM_LIMIT = 20
+const IGNORED_SPRINT_JIRA_IDS = ['9583']
 
 const METRICS_CACHE_TTL_MS = 30_000
 const metricsCache = new Map<string, { timestamp: number; payload: unknown }>()
@@ -33,11 +34,13 @@ type JiraTicketLite = {
   status?: string | null
   storyPoints?: number | null
   qaBounceBackCount?: number | null
+  carryoverCount?: number | null
   assignee?: string | null
   jiraId?: string | null
   summary?: string | null
   issueType?: string | null
   jiraCreatedAt?: Date | string | null
+  jiraClosedAt?: Date | string | null
   updatedAt?: Date | string | null
 }
 
@@ -111,6 +114,94 @@ function isStrictClosed(status?: string | null) {
   return value.includes('closed') || value.includes('done')
 }
 
+function buildSprintMetrics(sprint: SprintWithTickets, now: Date) {
+  const totalTickets =
+    typeof sprint.totalTickets === 'number' && sprint.totalTickets > 0
+      ? sprint.totalTickets
+      : sprint.tickets.length
+  const closedTickets =
+    typeof sprint.closedTickets === 'number' && sprint.closedTickets >= 0
+      ? sprint.closedTickets
+      : sprint.tickets.filter((ticket: JiraTicketLite) => isStrictClosed(ticket.status)).length
+  const successPercent = totalTickets
+    ? Math.round((closedTickets / totalTickets) * 1000) / 10
+    : 0
+  const devTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
+    DEV_STATUSES.some((status) => (ticket.status || '').toLowerCase().includes(status))
+  ).length
+  const qaTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
+    QA_ACTIVE_STATUSES.some((status) => (ticket.status || '').toLowerCase().includes(status))
+  ).length
+  const doneTickets = closedTickets
+  const qaReadyTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
+    QA_READY_STATUSES.some((status) => (ticket.status || '').toLowerCase().includes(status))
+  ).length
+  const finalPhaseTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
+    FINAL_PHASE_STATUSES.some((status) => (ticket.status || '').toLowerCase().includes(status))
+  ).length
+  const bounceBackTickets = sprint.tickets.filter(
+    (ticket: JiraTicketLite) => (ticket.qaBounceBackCount || 0) > 0
+  ).length
+  const bounceBackPercent = totalTickets
+    ? Math.round((bounceBackTickets / totalTickets) * 1000) / 10
+    : 0
+  const storyPointsTotal =
+    sprint.storyPointsTotal > 0
+      ? sprint.storyPointsTotal
+      : sprint.tickets.reduce(
+          (sum: number, ticket: JiraTicketLite) => sum + (ticket.storyPoints || 0),
+          0
+        )
+  const storyPointsCompleted = sprint.tickets.reduce((sum: number, ticket: JiraTicketLite) => {
+    return sum + (isStrictClosed(ticket.status) ? ticket.storyPoints || 0 : 0)
+  }, 0)
+  const daysLeft = Math.ceil(
+    (sprint.endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+  )
+
+  const assigneeTotals = new Map<string, { total: number; closed: number }>()
+  for (const ticket of sprint.tickets || []) {
+    const name = (ticket.assignee || '').trim()
+    if (!name) continue
+    const points = ticket.storyPoints || 0
+    const entry = assigneeTotals.get(name) || { total: 0, closed: 0 }
+    entry.total += points
+    const isClosed = isStrictClosed(ticket.status)
+    if (isClosed) {
+      entry.closed += points
+    }
+    assigneeTotals.set(name, entry)
+  }
+
+  const assigneeTotalsList = Array.from(assigneeTotals.entries())
+    .map(([name, values]) => ({
+      name,
+      total: values.total,
+      closed: values.closed,
+    }))
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
+
+  return {
+    id: sprint.id,
+    name: sprint.name,
+    teamKey: getTeamKey(sprint.name),
+    successPercent,
+    daysLeft,
+    devTickets,
+    qaTickets,
+    doneTickets,
+    qaReadyTickets,
+    finalPhaseTickets,
+    bounceBackPercent,
+    bounceBackTickets,
+    storyPointsTotal,
+    storyPointsCompleted,
+    totalTickets,
+    closedTickets,
+    assignees: assigneeTotalsList,
+  }
+}
+
 function isBusinessDay(date: Date) {
   const day = date.getDay()
   return day >= 1 && day <= 5
@@ -140,6 +231,11 @@ function buildJiraHeaders(credentials: JiraCredentials) {
   const user = credentials.user || ''
   const basicToken = Buffer.from(`${user}:${credentials.token}`).toString('base64')
   return { Authorization: `Basic ${basicToken}` }
+}
+
+function parseDate(value?: Date | string | null) {
+  if (!value) return null
+  return value instanceof Date ? value : new Date(value)
 }
 
 async function getTicketWorkHours(
@@ -238,111 +334,31 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
     }
 
     const activeSprints = (await prisma.sprint.findMany({
-      where: { status: 'ACTIVE' },
+      where: {
+        status: 'ACTIVE',
+        jiraId: { notIn: IGNORED_SPRINT_JIRA_IDS },
+      },
       include: { tickets: true },
       orderBy: { endDate: 'asc' },
     })) as SprintWithTickets[]
+    const syncedSprintsRaw = (await prisma.sprint.findMany({
+      where: {
+        jiraId: { notIn: IGNORED_SPRINT_JIRA_IDS },
+      },
+      include: { tickets: true },
+      orderBy: { endDate: 'desc' },
+    })) as SprintWithTickets[]
+    const syncedSprintsScoped = limitByTeam(syncedSprintsRaw, sprintsToSync)
     const lastSyncSprint = await prisma.sprint.findFirst({
       orderBy: { updatedAt: 'desc' },
       select: { updatedAt: true },
     })
 
     const now = new Date()
-    const activeSprintMetrics = activeSprints.map((sprint: SprintWithTickets) => {
-      const totalTickets =
-        typeof sprint.totalTickets === 'number' && sprint.totalTickets > 0
-          ? sprint.totalTickets
-          : sprint.tickets.length
-      const closedTickets =
-        typeof sprint.closedTickets === 'number' && sprint.closedTickets >= 0
-          ? sprint.closedTickets
-          : sprint.tickets.filter((ticket: JiraTicketLite) => isStrictClosed(ticket.status)).length
-      const successPercent = totalTickets
-        ? Math.round((closedTickets / totalTickets) * 1000) / 10
-        : 0
-      const devTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
-        DEV_STATUSES.some((status) =>
-          (ticket.status || '').toLowerCase().includes(status)
-        )
-      ).length
-      const qaTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
-        QA_ACTIVE_STATUSES.some((status) =>
-          (ticket.status || '').toLowerCase().includes(status)
-        )
-      ).length
-      const doneTickets = closedTickets
-      const qaReadyTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
-        QA_READY_STATUSES.some((status) =>
-          (ticket.status || '').toLowerCase().includes(status)
-        )
-      ).length
-      const finalPhaseTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
-        FINAL_PHASE_STATUSES.some((status) =>
-          (ticket.status || '').toLowerCase().includes(status)
-        )
-      ).length
-      const bounceBackTickets = sprint.tickets.filter(
-        (ticket: JiraTicketLite) => (ticket.qaBounceBackCount || 0) > 0
-      ).length
-      const bounceBackPercent = totalTickets
-        ? Math.round((bounceBackTickets / totalTickets) * 1000) / 10
-        : 0
-      const storyPointsTotal =
-        sprint.storyPointsTotal > 0
-          ? sprint.storyPointsTotal
-          : sprint.tickets.reduce(
-              (sum: number, ticket: JiraTicketLite) => sum + (ticket.storyPoints || 0),
-              0
-            )
-      const storyPointsCompleted = sprint.tickets.reduce((sum: number, ticket: JiraTicketLite) => {
-        return sum + (isStrictClosed(ticket.status) ? ticket.storyPoints || 0 : 0)
-      }, 0)
-      const daysLeft = Math.ceil(
-        (sprint.endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-      )
-
-      const assigneeTotals = new Map<string, { total: number; closed: number }>()
-      for (const ticket of sprint.tickets || []) {
-        const name = (ticket.assignee || '').trim()
-        if (!name) continue
-        const points = ticket.storyPoints || 0
-        const entry = assigneeTotals.get(name) || { total: 0, closed: 0 }
-        entry.total += points
-        const isClosed = isStrictClosed(ticket.status)
-        if (isClosed) {
-          entry.closed += points
-        }
-        assigneeTotals.set(name, entry)
-      }
-
-      const assigneeTotalsList = Array.from(assigneeTotals.entries())
-        .map(([name, values]) => ({
-          name,
-          total: values.total,
-          closed: values.closed,
-        }))
-        .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
-
-      return {
-        id: sprint.id,
-        name: sprint.name,
-        teamKey: getTeamKey(sprint.name),
-        successPercent,
-        daysLeft,
-        devTickets,
-        qaTickets,
-        doneTickets,
-        qaReadyTickets,
-        finalPhaseTickets,
-        bounceBackPercent,
-        bounceBackTickets,
-        storyPointsTotal,
-        storyPointsCompleted,
-        totalTickets,
-        closedTickets,
-        assignees: assigneeTotalsList,
-      }
-    })
+    const activeSprintMetrics = activeSprints.map((sprint: SprintWithTickets) =>
+      buildSprintMetrics(sprint, now)
+    )
+    const syncedSprints = syncedSprintsScoped.map((sprint) => buildSprintMetrics(sprint, now))
 
     const riskSignals: Array<{
       sprintId: string
@@ -357,30 +373,26 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
       reasons: string[]
     }> = []
     const nowTime = now.getTime()
-    for (const sprint of activeSprints) {
+    for (const sprint of syncedSprintsScoped) {
       for (const ticket of sprint.tickets || []) {
         const status = (ticket.status || '').trim()
         if (isStrictClosed(status)) continue
-        const createdAtRaw = ticket.jiraCreatedAt || ticket.updatedAt
-        const createdAt = createdAtRaw ? new Date(createdAtRaw) : null
+        const createdAt = parseDate(ticket.jiraCreatedAt) || parseDate(ticket.updatedAt)
         const ageDays = createdAt ? Math.round(businessHoursBetween(createdAt, now) / 8) : 0
         const bounceBackCount = ticket.qaBounceBackCount || 0
         const isPastDue = sprint.endDate.getTime() < nowTime
-        const isFinalPhase = FINAL_PHASE_STATUSES.some((value) =>
+        const isFinalPhaseOpen = QA_READY_STATUSES.some((value) =>
           status.toLowerCase().includes(value)
         )
+        const carryoverCount = ticket.carryoverCount || 0
         const reasons: string[] = []
-        if (bounceBackCount > 0) {
-          reasons.push(`Bounce x${bounceBackCount}`)
-        }
-        if (ageDays >= 7) {
-          reasons.push(`${ageDays}d active`)
-        }
-        if (isPastDue && !isFinalPhase) {
-          reasons.push('Past due')
-        }
+        if (carryoverCount > 0) reasons.push(`Carryover x${carryoverCount}`)
+        if (isFinalPhaseOpen) reasons.push('Final phase open')
+        if (bounceBackCount > 0) reasons.push(`Bounce x${bounceBackCount}`)
+        if (isPastDue) reasons.push('Past due')
         if (reasons.length === 0) continue
-        const riskScore = bounceBackCount * 3 + ageDays + (isPastDue ? 5 : 0)
+        const riskScore =
+          bounceBackCount * 3 + carryoverCount * 2 + (isFinalPhaseOpen ? 2 : 0) + (isPastDue ? 5 : 0)
         riskSignals.push({
           sprintId: sprint.id,
           sprintName: sprint.name,
@@ -417,44 +429,80 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
       sprintId: string
       sprintName: string
       teamKey: string
-      count: number
-      averageAgeDays: number
-      oldestAgeDays: number
+      created: number
+      closed: number
+      open: number
+      averageOpenAgeDays: number
+      oldestOpenAgeDays: number
     }> = []
     let openBugTotal = 0
+    let openBugCreatedTotal = 0
+    let openBugClosedTotal = 0
     let openBugAgeTotal = 0
     let openBugOldest = 0
-    for (const sprint of activeSprints) {
-      const bugs = (sprint.tickets || []).filter((ticket) => {
+    for (const sprint of syncedSprintsScoped) {
+      const bugsCreatedInSprint = (sprint.tickets || []).filter((ticket) => {
         const type = (ticket.issueType || '').toLowerCase()
         if (!type.includes('bug')) return false
-        return !isStrictClosed(ticket.status)
+        const createdAt = parseDate(ticket.jiraCreatedAt)
+        if (!createdAt) return false
+        return createdAt >= sprint.startDate && createdAt <= sprint.endDate
       })
-      if (bugs.length === 0) continue
-      const ages = bugs.map((ticket) => {
-        const createdAt = ticket.jiraCreatedAt ? new Date(ticket.jiraCreatedAt) : null
+      if (bugsCreatedInSprint.length === 0) continue
+      const isActiveSprint = sprint.status === 'ACTIVE'
+      const ages = bugsCreatedInSprint.map((ticket) => {
+        const createdAt = parseDate(ticket.jiraCreatedAt)
         if (!createdAt) return 0
-        return Math.round(businessHoursBetween(createdAt, now) / 8)
+        const endPoint = isActiveSprint ? now : sprint.endDate
+        return Math.round(businessHoursBetween(createdAt, endPoint) / 8)
       })
-      const totalAge = ages.reduce((sum, value) => sum + value, 0)
-      const oldest = ages.length ? Math.max(...ages) : 0
+      const closedInSprint = bugsCreatedInSprint.filter((ticket) => {
+        if (!isStrictClosed(ticket.status)) return false
+        const closedAt = parseDate(ticket.jiraClosedAt) || parseDate(ticket.updatedAt)
+        if (!closedAt) return false
+        return closedAt >= sprint.startDate && closedAt <= sprint.endDate
+      })
+      const openInSprint = bugsCreatedInSprint.filter((ticket) => {
+        const closedAt = parseDate(ticket.jiraClosedAt) || parseDate(ticket.updatedAt)
+        if (isActiveSprint) {
+          return !closedAt || !isStrictClosed(ticket.status)
+        }
+        return !closedAt || closedAt > sprint.endDate || !isStrictClosed(ticket.status)
+      })
+      const openAges = openInSprint.map((ticket) => {
+        const createdAt = parseDate(ticket.jiraCreatedAt)
+        if (!createdAt) return 0
+        const endPoint = isActiveSprint ? now : sprint.endDate
+        return Math.round(businessHoursBetween(createdAt, endPoint) / 8)
+      })
+      const totalOpenAge = openAges.reduce((sum, value) => sum + value, 0)
+      const oldestOpen = openAges.length ? Math.max(...openAges) : 0
       openBugEntries.push({
         sprintId: sprint.id,
         sprintName: sprint.name,
         teamKey: getTeamKey(sprint.name),
-        count: bugs.length,
-        averageAgeDays: bugs.length ? Math.round((totalAge / bugs.length) * 10) / 10 : 0,
-        oldestAgeDays: oldest,
+        created: bugsCreatedInSprint.length,
+        closed: closedInSprint.length,
+        open: openInSprint.length,
+        averageOpenAgeDays:
+          openInSprint.length ? Math.round((totalOpenAge / openInSprint.length) * 10) / 10 : 0,
+        oldestOpenAgeDays: oldestOpen,
       })
-      openBugTotal += bugs.length
-      openBugAgeTotal += totalAge
-      openBugOldest = Math.max(openBugOldest, oldest)
+      openBugTotal += openInSprint.length
+      openBugCreatedTotal += bugsCreatedInSprint.length
+      openBugClosedTotal += closedInSprint.length
+      openBugAgeTotal += totalOpenAge
+      openBugOldest = Math.max(openBugOldest, oldestOpen)
     }
     const openBugMetrics = {
-      total: openBugTotal,
-      averageAgeDays: openBugTotal ? Math.round((openBugAgeTotal / openBugTotal) * 10) / 10 : 0,
-      oldestAgeDays: openBugOldest,
-      bySprint: openBugEntries.sort((a, b) => b.count - a.count || a.sprintName.localeCompare(b.sprintName)),
+      totalOpen: openBugTotal,
+      totalCreated: openBugCreatedTotal,
+      totalClosed: openBugClosedTotal,
+      averageOpenAgeDays: openBugTotal ? Math.round((openBugAgeTotal / openBugTotal) * 10) / 10 : 0,
+      oldestOpenAgeDays: openBugOldest,
+      bySprint: openBugEntries.sort(
+        (a, b) => b.open - a.open || a.sprintName.localeCompare(b.sprintName)
+      ),
     }
 
     const currentStoryPoints = activeSprintMetrics.reduce(
@@ -629,7 +677,10 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
       .sort((a, b) => b.ticketCount - a.ticketCount || a.name.localeCompare(b.name))
 
     const lastSprintSnapshotsRaw = await prisma.sprintSnapshot.findMany({
-      where: { status: { in: ['COMPLETED', 'CLOSED'] } },
+      where: {
+        status: { in: ['COMPLETED', 'CLOSED'] },
+        jiraId: { notIn: IGNORED_SPRINT_JIRA_IDS },
+      },
       orderBy: { endDate: 'desc' },
       take: 200,
     })
@@ -759,7 +810,10 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
       sprintCount: entry.sprintCount,
     }))
     const previousSprintsRaw = (await prisma.sprint.findMany({
-      where: { status: { in: ['CLOSED', 'COMPLETED'] } },
+      where: {
+        status: { in: ['CLOSED', 'COMPLETED'] },
+        jiraId: { notIn: IGNORED_SPRINT_JIRA_IDS },
+      },
       include: { tickets: true },
       orderBy: { endDate: 'desc' },
       take: 200,
@@ -920,6 +974,7 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
       },
       activeSprintCount: activeSprintMetrics.length,
       activeSprints: activeSprintMetrics,
+      syncedSprints,
       releaseReadiness: activeSprintMetrics.map((sprint) => ({
         id: sprint.id,
         name: sprint.name,

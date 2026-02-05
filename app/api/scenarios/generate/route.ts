@@ -14,6 +14,15 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
 
     const { ticketId, xmlText, confluence } = await req.json()
 
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+    })
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    }
+
+    const adminSettings = await prisma.adminSettings.findFirst()
+
     let jiraDetails
     let existingTicket: {
       id: string
@@ -24,14 +33,6 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
 
     // Fetch Jira ticket details
     if (ticketId) {
-      const user = await prisma.user.findUnique({
-        where: { id: payload.userId },
-      })
-      if (!user) {
-        return NextResponse.json({ error: 'User not found' }, { status: 404 })
-      }
-
-      const adminSettings = await prisma.adminSettings.findFirst()
       const jiraCredentials = buildJiraCredentialsFromUser(
         user,
         adminSettings?.jiraBaseUrl || null
@@ -80,7 +81,14 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
     }
 
     // Generate scenarios using AI
-    const generated = await generateScenariosWithAI(jiraDetails, confluence)
+    const aiConfig = {
+      apiKey: user.openaiApiKey || undefined,
+      model: user.openaiModel || undefined,
+      baseUrl: adminSettings?.aiBaseUrl || null,
+      maxTokens: adminSettings?.aiMaxTokens ?? 4096,
+    }
+
+    const generated = await generateScenariosWithAI(jiraDetails, confluence, aiConfig)
 
     return NextResponse.json({
       jiraDetails,

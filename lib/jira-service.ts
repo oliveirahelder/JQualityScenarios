@@ -140,7 +140,13 @@ export async function parseJiraXml(xmlText: string): Promise<JiraDetails[]> {
 
 export async function generateScenariosWithAI(
   ticketDetails: JiraDetails,
-  confluenceContext?: string
+  confluenceContext?: string,
+  aiConfig?: {
+    apiKey?: string | null
+    model?: string | null
+    baseUrl?: string | null
+    maxTokens?: number | null
+  }
 ): Promise<GeneratedScenarios> {
   try {
     const systemPrompt = `You are an expert QA analyst focused on manual functional testing and BDD automation.
@@ -188,11 +194,18 @@ ${confluenceContext ? `\nRelated Documentation:\n${confluenceContext}` : ''}
 
 Please generate test scenarios for this ticket.`
 
+    const resolvedMaxTokens =
+      typeof aiConfig?.maxTokens === 'number' && Number.isFinite(aiConfig.maxTokens)
+        ? aiConfig.maxTokens
+        : 1024
     const content = await generateJsonWithOpenAI({
       system: systemPrompt,
       user: userContent,
-      maxTokens: 1024,
+      maxTokens: resolvedMaxTokens,
       temperature: 0.2,
+      apiKey: aiConfig?.apiKey || undefined,
+      model: aiConfig?.model || undefined,
+      baseUrl: aiConfig?.baseUrl || undefined,
     })
 
     const normalizeString = (value: unknown) =>

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 
 const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
 const MAX_SPRINTS_PER_TEAM_LIMIT = 50
+const IGNORED_SPRINT_JIRA_IDS = ['9583']
 
 function getTeamKey(name: string) {
   const trimmed = name.trim()
@@ -29,10 +30,11 @@ export const GET = withAuth(
         typeof settings?.sprintsToSync === 'number' && Number.isFinite(settings.sprintsToSync)
           ? Math.min(Math.max(Math.floor(settings.sprintsToSync), 1), MAX_SPRINTS_PER_TEAM_LIMIT)
           : DEFAULT_SPRINTS_PER_TEAM_LIMIT
-      const cutoffDate = new Date(Date.UTC(2025, 11, 1))
       const snapshots = await prisma.sprintSnapshot.findMany({
+        where: {
+          jiraId: { notIn: IGNORED_SPRINT_JIRA_IDS },
+        },
         orderBy: { endDate: 'desc' },
-        where: { endDate: { gte: cutoffDate } },
         take: 200,
       })
 

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
 const MIN_SPRINTS_PER_TEAM_LIMIT = 2
 const MAX_SPRINTS_PER_TEAM_LIMIT = 20
+const IGNORED_SPRINT_JIRA_IDS = ['9583']
 
 function getTeamKey(name: string) {
   const trimmed = name.trim()
@@ -59,6 +60,9 @@ export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
       : null
 
     const sprints = await prisma.sprint.findMany({
+      where: {
+        jiraId: { notIn: IGNORED_SPRINT_JIRA_IDS },
+      },
       include: {
         tickets: {
           include: {

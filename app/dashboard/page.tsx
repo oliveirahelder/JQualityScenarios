@@ -61,11 +61,8 @@ export default function Dashboard() {
   const [syncMessage, setSyncMessage] = useState('')
   const [syncError, setSyncError] = useState('')
   const [selectedSprintId, setSelectedSprintId] = useState<string | null>(null)
-  const [selectedTeamKey, setSelectedTeamKey] = useState<string>('all')
+  const [selectedTeamKey, setSelectedTeamKey] = useState<string>('')
   const [selectedRole, setSelectedRole] = useState<'management' | 'qa' | 'product'>('management')
-  const [riskScope, setRiskScope] = useState<'selected' | 'all'>('selected')
-  const [selectedRange, setSelectedRange] = useState<number | null>(null)
-  const [rangeOverride, setRangeOverride] = useState<number | null>(null)
   const [docsLoading, setDocsLoading] = useState(true)
   const [documentationBySprint, setDocumentationBySprint] = useState<
     Record<
@@ -81,13 +78,26 @@ export default function Dashboard() {
   >({})
   const [metricValues, setMetricValues] = useState({
     lastSyncAt: null as string | null,
-    storyPointRange: 10,
-    rangeBounds: {
-      min: 2,
-      max: 20,
-    },
     activeSprintCount: null as number | null,
     activeSprints: [] as Array<{
+      id: string
+      name: string
+      teamKey: string
+      successPercent: number
+      daysLeft: number
+      devTickets: number
+      qaTickets: number
+      doneTickets: number
+      bounceBackPercent: number
+      bounceBackTickets: number
+      storyPointsTotal: number
+      storyPointsCompleted: number
+      totalTickets: number
+      closedTickets: number
+      finalPhaseTickets: number
+      assignees: Array<{ name: string; total: number; closed: number }>
+    }>,
+    syncedSprints: [] as Array<{
       id: string
       name: string
       teamKey: string
@@ -117,70 +127,23 @@ export default function Dashboard() {
       riskScore: number
       reasons: string[]
     }>,
-    riskSignalsTotal: 0,
-    riskSignalsTotalsBySprint: [] as Array<{
-      sprintId: string
-      teamKey: string
-      count: number
-    }>,
     openBugs: {
-      total: 0,
-      averageAgeDays: 0,
-      oldestAgeDays: 0,
+      totalOpen: 0,
+      totalCreated: 0,
+      totalClosed: 0,
+      averageOpenAgeDays: 0,
+      oldestOpenAgeDays: 0,
       bySprint: [] as Array<{
         sprintId: string
         sprintName: string
         teamKey: string
-        count: number
-        averageAgeDays: number
-        oldestAgeDays: number
+        created: number
+        closed: number
+        open: number
+        averageOpenAgeDays: number
+        oldestOpenAgeDays: number
       }>,
     },
-    storyPoints: {
-      currentTotal: null as number | null,
-      previousTotal: null as number | null,
-      delta: null as number | null,
-    },
-    finishedComparison: null as null | {
-      activeSprintId: string
-      activeSprintName: string
-      activeClosedTickets: number
-      activeStoryPointsClosed: number
-      previousSprintId: string | null
-      previousSprintName: string | null
-      previousClosedTickets: number
-      previousStoryPointsClosed: number
-      periodDays: number
-    },
-    finishedComparisonByTeam: [] as Array<{
-      teamKey: string
-      activeSprintId: string
-      activeSprintName: string
-      activeClosedTickets: number
-      activeStoryPointsClosed: number
-      previousSprintId: string | null
-      previousSprintName: string | null
-      previousTeamSize: number
-      previousTotalTickets: number
-      previousStoryPointsTotal: number
-      previousClosedTickets: number
-      previousStoryPointsClosed: number
-      periodDays: number
-    }>,
-    storyPointsByTeam: [] as Array<{
-      teamKey: string
-      activeSprintId: string
-      activeSprintName: string
-      activeStoryPointsTotal: number
-      activeStoryPointsClosed: number
-      previousSprintId: string | null
-      previousSprintName: string | null
-      previousStoryPointsTotal: number
-      previousStoryPointsClosed: number
-      averageStoryPointsTotal: number
-      averageStoryPointsClosed: number
-      averageSprintCount: number
-    }>,
     assignees: [] as Array<{
       name: string
       total: number
@@ -195,10 +158,8 @@ export default function Dashboard() {
     setMetricsLoading(true)
     try {
       const authToken = localStorage.getItem('token')
-      const rangeQuery =
-        rangeOverride != null ? `&range=${encodeURIComponent(rangeOverride)}` : ''
       const response = await fetch(
-        `/api/metrics/jira?includeDeliveryTimes=0${rangeQuery}`,
+        '/api/metrics/jira?includeDeliveryTimes=0',
         {
           headers: { Authorization: `Bearer ${authToken}` },
         }
@@ -209,49 +170,34 @@ export default function Dashboard() {
       const data = await response.json()
       setMetricValues({
         lastSyncAt: data.lastSyncAt ?? null,
-        storyPointRange: data.storyPointRange ?? 10,
-        rangeBounds: data.rangeBounds ?? { min: 2, max: 20 },
         activeSprintCount: data.activeSprintCount ?? null,
         activeSprints: data.activeSprints || [],
+        syncedSprints: data.syncedSprints || [],
         riskSignals: data.riskSignals || [],
-        riskSignalsTotal: data.riskSignalsTotal ?? (data.riskSignals ? data.riskSignals.length : 0),
-        riskSignalsTotalsBySprint: data.riskSignalsTotalsBySprint || [],
         openBugs: data.openBugs || {
-          total: 0,
-          averageAgeDays: 0,
-          oldestAgeDays: 0,
+          totalOpen: 0,
+          totalCreated: 0,
+          totalClosed: 0,
+          averageOpenAgeDays: 0,
+          oldestOpenAgeDays: 0,
           bySprint: [],
         },
-        storyPoints: {
-          currentTotal: data.storyPoints?.currentTotal ?? null,
-          previousTotal: data.storyPoints?.previousTotal ?? null,
-          delta: data.storyPoints?.delta ?? null,
-        },
-        finishedComparison: data.finishedComparison ?? null,
-        finishedComparisonByTeam: data.finishedComparisonByTeam || [],
-        storyPointsByTeam: data.storyPointsByTeam || [],
         assignees: data.assignees || [],
         deliveryTimes: data.deliveryTimes || [],
         deliveryTimesBySprint: data.deliveryTimesBySprint || [],
       })
-      if (typeof data.storyPointRange === 'number') {
-        setSelectedRange(data.storyPointRange)
-      }
     } catch {
       // Keep defaults on error
     } finally {
       setMetricsLoading(false)
     }
-  }, [rangeOverride])
+  }, [])
 
   const loadDocs = useCallback(async () => {
     setDocsLoading(true)
     try {
       const authToken = localStorage.getItem('token')
-      const activeRange = rangeOverride ?? selectedRange
-      const rangeQuery =
-        activeRange != null ? `?range=${encodeURIComponent(activeRange)}` : ''
-      const response = await fetch(`/api/sprints${rangeQuery}`, {
+      const response = await fetch('/api/sprints', {
         headers: { Authorization: `Bearer ${authToken}` },
       })
       if (!response.ok) {
@@ -278,7 +224,7 @@ export default function Dashboard() {
     } finally {
       setDocsLoading(false)
     }
-  }, [rangeOverride, selectedRange])
+  }, [])
 
   useEffect(() => {
     const storedUser = localStorage.getItem('user')
@@ -301,6 +247,11 @@ export default function Dashboard() {
   useEffect(() => {
     loadDocs()
   }, [loadDocs])
+
+  const syncedSprints =
+    metricValues.syncedSprints.length > 0
+      ? metricValues.syncedSprints
+      : metricValues.activeSprints
 
   const handleJiraSync = async () => {
     setSyncing(true)
@@ -331,44 +282,57 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    const activeSprints =
-      selectedTeamKey === 'all'
-        ? metricValues.activeSprints
-        : metricValues.activeSprints.filter((sprint) => sprint.teamKey === selectedTeamKey)
-    if (activeSprints.length === 0) {
+    const syncedSprintList = selectedTeamKey
+      ? syncedSprints.filter((sprint) => sprint.teamKey === selectedTeamKey)
+      : syncedSprints
+    if (syncedSprintList.length === 0) {
       if (selectedSprintId !== null) {
         setSelectedSprintId(null)
       }
       return
     }
-    if (selectedSprintId && activeSprints.some((sprint) => sprint.id === selectedSprintId)) {
+    if (selectedSprintId && syncedSprintList.some((sprint) => sprint.id === selectedSprintId)) {
       return
     }
-    const sorted = [...activeSprints].sort(
-      (a, b) => a.daysLeft - b.daysLeft || a.name.localeCompare(b.name)
-    )
-    setSelectedSprintId(sorted[0]?.id || null)
-  }, [metricValues.activeSprints, selectedSprintId, selectedTeamKey])
+    const activeSprintList = selectedTeamKey
+      ? metricValues.activeSprints.filter((sprint) => sprint.teamKey === selectedTeamKey)
+      : metricValues.activeSprints
+    const defaultSprint =
+      activeSprintList.length > 0
+        ? [...activeSprintList].sort(
+            (a, b) => a.daysLeft - b.daysLeft || a.name.localeCompare(b.name)
+          )[0]
+        : [...syncedSprintList].sort(
+            (a, b) => a.daysLeft - b.daysLeft || a.name.localeCompare(b.name)
+          )[0]
+    setSelectedSprintId(defaultSprint?.id || null)
+  }, [syncedSprints, selectedSprintId, selectedTeamKey])
 
-  const teamKeys = Array.from(
-    new Set(metricValues.activeSprints.map((sprint) => sprint.teamKey))
-  ).sort((a, b) => a.localeCompare(b))
 
-  const filteredActiveSprints =
-    selectedTeamKey === 'all'
-      ? metricValues.activeSprints
-      : metricValues.activeSprints.filter((sprint) => sprint.teamKey === selectedTeamKey)
+
+  const teamKeys = Array.from(new Set(syncedSprints.map((sprint) => sprint.teamKey))).sort(
+    (a, b) => a.localeCompare(b)
+  )
+
+  useEffect(() => {
+    if (teamKeys.length === 0) return
+    if (!selectedTeamKey || !teamKeys.includes(selectedTeamKey)) {
+      setSelectedTeamKey(teamKeys[0])
+    }
+  }, [teamKeys, selectedTeamKey])
+
+  const filteredSyncedSprints = selectedTeamKey
+    ? syncedSprints.filter((sprint) => sprint.teamKey === selectedTeamKey)
+    : syncedSprints
+
+  const filteredActiveSprints = selectedTeamKey
+    ? metricValues.activeSprints.filter((sprint) => sprint.teamKey === selectedTeamKey)
+    : metricValues.activeSprints
 
   const selectedSprint =
-    filteredActiveSprints.find((sprint) => sprint.id === selectedSprintId) ||
-    filteredActiveSprints[0] ||
+    filteredSyncedSprints.find((sprint) => sprint.id === selectedSprintId) ||
+    filteredSyncedSprints[0] ||
     null
-
-  const selectedComparison = selectedSprint
-    ? metricValues.finishedComparisonByTeam.find(
-        (entry) => entry.activeSprintId === selectedSprint.id
-      )
-    : null
 
   const totalTickets = filteredActiveSprints.reduce(
     (sum, sprint) => sum + sprint.totalTickets,
@@ -390,50 +354,34 @@ export default function Dashboard() {
     : 0
 
   const riskSignalsFiltered = metricValues.riskSignals.filter(
-    (signal) => selectedTeamKey === 'all' || signal.teamKey === selectedTeamKey
+    (signal) => !selectedTeamKey || signal.teamKey === selectedTeamKey
   )
-  const riskSignalsScoped =
-    selectedSprint && riskScope === 'selected'
-      ? riskSignalsFiltered.filter((signal) => signal.sprintId === selectedSprint.id)
-      : riskSignalsFiltered
-  const riskCount = (() => {
-    if (!metricValues.riskSignalsTotalsBySprint.length) {
-      return riskSignalsScoped.length
-    }
-    if (riskScope === 'selected' && selectedSprint) {
-      const entry = metricValues.riskSignalsTotalsBySprint.find(
-        (item) => item.sprintId === selectedSprint.id
-      )
-      if (!entry) return 0
-      if (selectedTeamKey !== 'all' && entry.teamKey !== selectedTeamKey) {
-        return 0
-      }
-      return entry.count
-    }
-    if (selectedTeamKey === 'all') {
-      return metricValues.riskSignalsTotal || riskSignalsScoped.length
-    }
-    return metricValues.riskSignalsTotalsBySprint
-      .filter((item) => item.teamKey === selectedTeamKey)
-      .reduce((sum, item) => sum + item.count, 0)
-  })()
+  const riskSignalsScoped = selectedSprint
+    ? riskSignalsFiltered.filter((signal) => signal.sprintId === selectedSprint.id)
+    : riskSignalsFiltered
+  const riskCount = riskSignalsScoped.length
   const riskLevelLabel = riskCount >= 8 ? 'High' : riskCount >= 4 ? 'Medium' : 'Low'
 
   const openBugsScoped = metricValues.openBugs.bySprint.filter((entry) => {
-    if (selectedTeamKey !== 'all' && entry.teamKey !== selectedTeamKey) return false
+    if (selectedTeamKey && entry.teamKey !== selectedTeamKey) return false
     if (selectedSprint?.id && entry.sprintId !== selectedSprint.id) return false
     return true
   })
-  const openBugTotal = openBugsScoped.reduce((sum, entry) => sum + entry.count, 0)
+  const openBugCreated = openBugsScoped.reduce((sum, entry) => sum + entry.created, 0)
+  const openBugClosed = openBugsScoped.reduce((sum, entry) => sum + entry.closed, 0)
+  const openBugTotal = openBugsScoped.reduce((sum, entry) => sum + entry.open, 0)
   const openBugAverageAge = openBugTotal
     ? Math.round(
-        (openBugsScoped.reduce((sum, entry) => sum + entry.averageAgeDays * entry.count, 0) /
+        (openBugsScoped.reduce(
+          (sum, entry) => sum + entry.averageOpenAgeDays * entry.open,
+          0
+        ) /
           openBugTotal) *
           10
       ) / 10
     : 0
   const openBugOldest = openBugsScoped.reduce(
-    (max, entry) => Math.max(max, entry.oldestAgeDays),
+    (max, entry) => Math.max(max, entry.oldestOpenAgeDays),
     0
   )
 
@@ -441,13 +389,6 @@ export default function Dashboard() {
   const docsPending = selectedDocStats
     ? selectedDocStats.draft + selectedDocStats.underReview
     : 0
-
-  const scopeDelta =
-    selectedSprint && selectedComparison?.previousTotalTickets != null
-      ? selectedSprint.totalTickets - selectedComparison.previousTotalTickets
-      : null
-  const scopeDeltaLabel =
-    scopeDelta != null ? `${scopeDelta >= 0 ? '+' : ''}${scopeDelta}` : '--'
 
   const heroMetrics: MetricCard[] = [
     {
@@ -479,7 +420,7 @@ export default function Dashboard() {
       value: metricsLoading ? '--' : riskLevelLabel,
       subtitle: metricsLoading
         ? 'Loading risk signals'
-        : `${riskCount} risk signals`,
+        : `${riskCount} signals · carryover, final phase, bounce, past due`,
       icon: Zap,
       color: 'from-rose-600 to-rose-500',
       size: 'hero',
@@ -489,7 +430,7 @@ export default function Dashboard() {
       value: metricsLoading ? '--' : openBugTotal,
       subtitle: metricsLoading
         ? 'Loading bug aging'
-        : `${openBugAverageAge}d avg · ${openBugOldest}d oldest`,
+        : `Created ${openBugCreated} / Closed ${openBugClosed} / ${openBugAverageAge}d avg`,
       icon: Bug,
       color: 'from-red-600 to-red-500',
       size: 'hero',
@@ -523,7 +464,7 @@ export default function Dashboard() {
           : `${selectedSprint?.bounceBackPercent ?? totalBounceBackPercent}%`,
         subtitle: selectedSprint
           ? `${selectedSprint.bounceBackTickets} returns`
-          : 'Across active sprints',
+          : 'Carryover, final phase, bounce back, past due',
         icon: BookOpen,
         color: 'from-amber-600 to-amber-500',
         size: 'compact',
@@ -543,7 +484,7 @@ export default function Dashboard() {
         value: metricsLoading ? '--' : openBugTotal,
         subtitle: metricsLoading
           ? 'Loading bug aging'
-          : `${openBugAverageAge}d avg · ${openBugOldest}d oldest`,
+          : `Created ${openBugCreated} / Closed ${openBugClosed} / ${openBugAverageAge}d avg`,
         icon: Bug,
         color: 'from-red-600 to-red-500',
         size: 'compact',
@@ -574,13 +515,14 @@ export default function Dashboard() {
         size: 'compact',
       },
       {
-        title: 'Scope Change',
-        value: metricsLoading || scopeDelta == null ? '--' : scopeDeltaLabel,
-        subtitle: selectedComparison?.previousSprintName
-          ? `vs ${selectedComparison.previousSprintName}`
-          : 'No previous sprint',
+        title: 'Sprint Scope',
+        value: metricsLoading ? '--' : selectedSprint?.totalTickets ?? 0,
+        subtitle: selectedSprint
+          ? `Planned tickets in ${selectedSprint.name}`
+          : 'No active sprint',
         icon: GitBranch,
         color: 'from-purple-600 to-purple-500',
+        trend: selectedSprint ? `${selectedSprint.doneTickets} finished` : '',
         size: 'compact',
       },
       {
@@ -603,26 +545,11 @@ export default function Dashboard() {
     title: 'Risk Signals',
     value: metricsLoading ? '--' : riskCount,
     subtitle:
-      riskScope === 'selected' && selectedSprint
+      selectedSprint
         ? `${selectedSprint.name} · ${riskLevelLabel} risk`
-        : 'Across active sprints',
+        : 'Carryover, final phase, bounce back, past due',
     icon: Zap,
     color: 'from-rose-600 to-rose-500',
-    filter: (
-      <div className="flex items-center justify-between gap-3 text-xs">
-        <span className="text-slate-400">Scope</span>
-        <select
-          className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
-          value={riskScope}
-          onChange={(event) =>
-            setRiskScope(event.target.value === 'all' ? 'all' : 'selected')
-          }
-        >
-          <option value="selected">Selected sprint</option>
-          <option value="all">All active</option>
-        </select>
-      </div>
-    ),
     columns: ['Ticket', 'Status', 'Signals'],
     rows: riskSignalsScoped.map((signal) => ({
       label: signal.jiraId || signal.summary,
@@ -699,7 +626,7 @@ export default function Dashboard() {
       : `${selectedSprint?.bounceBackPercent ?? totalBounceBackPercent}%`,
     subtitle: selectedSprint
       ? `${selectedSprint.bounceBackTickets} returned tickets`
-      : 'Across active sprints',
+      : 'No active sprint',
     icon: BookOpen,
     color: 'from-orange-600 to-orange-500',
     trend: metricsLoading ? '...' : '',
@@ -732,21 +659,6 @@ export default function Dashboard() {
       value: `${selectedSprint?.bounceBackPercent ?? totalBounceBackPercent}%`,
     },
   ]
-
-  const minRange = Number.isFinite(metricValues.rangeBounds?.min)
-    ? metricValues.rangeBounds.min
-    : 2
-  const maxRange = Number.isFinite(metricValues.rangeBounds?.max)
-    ? metricValues.rangeBounds.max
-    : 20
-  const normalizedMinRange = Math.min(minRange, maxRange)
-  const normalizedMaxRange = Math.max(minRange, maxRange)
-  const rangeOptions = Array.from(
-    { length: normalizedMaxRange - normalizedMinRange + 1 },
-    (_, index) => normalizedMinRange + index
-  )
-  const displayRange =
-    selectedRange ?? metricValues.storyPointRange ?? normalizedMinRange
 
 
   const renderMetricCard = (metric: MetricCard, key: string) => {
@@ -997,36 +909,12 @@ export default function Dashboard() {
           <div className="glass-card rounded-xl p-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2 text-xs text-slate-400">
-                <span>Time range</span>
-                <select
-                  className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
-                  value={displayRange}
-                  onChange={(event) => {
-                    const nextRange = Number(event.target.value)
-                    const clampedRange = Math.min(
-                      Math.max(nextRange, normalizedMinRange),
-                      normalizedMaxRange
-                    )
-                    setSelectedRange(clampedRange)
-                    setRangeOverride(clampedRange)
-                  }}
-                >
-                  {rangeOptions.map((range) => (
-                    <option key={range} value={range}>
-                      {`Last ${range} sprints`}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <span className="h-4 w-px bg-slate-700/60 hidden sm:block" />
-              <div className="flex items-center gap-2 text-xs text-slate-400">
                 <span>Team</span>
                 <select
                   className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
                   value={selectedTeamKey}
                   onChange={(event) => setSelectedTeamKey(event.target.value)}
                 >
-                  <option value="all">All teams</option>
                   {teamKeys.map((team) => (
                     <option key={team} value={team}>
                       {team}
@@ -1042,20 +930,20 @@ export default function Dashboard() {
                   value={selectedSprint?.id || ''}
                   onChange={(event) => setSelectedSprintId(event.target.value || null)}
                 >
-                  {filteredActiveSprints.length ? (
-                    filteredActiveSprints.map((sprint) => (
+                  {filteredSyncedSprints.length ? (
+                    filteredSyncedSprints.map((sprint) => (
                       <option key={sprint.id} value={sprint.id}>
                         {sprint.teamKey} - {sprint.name}
                       </option>
                     ))
                   ) : (
-                    <option value="">No active sprints</option>
+                    <option value="">No synced sprints</option>
                   )}
                 </select>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-              <span className="badge">{selectedTeamKey === 'all' ? 'All teams' : selectedTeamKey}</span>
+              <span className="badge">{selectedSprint?.teamKey || selectedTeamKey}</span>
               <span className="badge badge-success">
                 {selectedSprint ? selectedSprint.name : 'No sprint'}
               </span>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { withAuth } from '@/lib/middleware'
+import { backupUserSettings } from '@/lib/settings-backup'
 
 export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
@@ -94,14 +95,14 @@ export const PUT = withAuth(async (req: NextRequest & { user?: any }) => {
       jiraConnectionCheckedAt?: Date | null
     } = {}
 
-    if (typeof normalizedUser === 'string') {
-      updateData.jiraUser = normalizedUser || null
+    if (typeof normalizedUser === 'string' && normalizedUser) {
+      updateData.jiraUser = normalizedUser
     }
-    if (typeof mergedBoardIds === 'string') {
-      updateData.jiraBoardIds = mergedBoardIds || null
+    if (typeof mergedBoardIds === 'string' && mergedBoardIds) {
+      updateData.jiraBoardIds = mergedBoardIds
     }
-    if (typeof normalizedSprintFieldId === 'string') {
-      updateData.jiraSprintFieldId = normalizedSprintFieldId || null
+    if (typeof normalizedSprintFieldId === 'string' && normalizedSprintFieldId) {
+      updateData.jiraSprintFieldId = normalizedSprintFieldId
     }
     if (typeof normalizedAuthType === 'string') {
       updateData.jiraAuthType = normalizedAuthType
@@ -136,10 +137,22 @@ export const PUT = withAuth(async (req: NextRequest & { user?: any }) => {
       updateData.jiraConnectionCheckedAt = null
     }
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: updateData,
-    })
+    if (Object.keys(updateData).length > 0) {
+      await backupUserSettings(user.id, {
+        jiraBaseUrl: user.jiraBaseUrl,
+        jiraUser: user.jiraUser,
+        jiraBoardIds: user.jiraBoardIds,
+        jiraSprintFieldId: user.jiraSprintFieldId,
+        jiraRequestTimeout: user.jiraRequestTimeout,
+        jiraAuthType: user.jiraAuthType,
+        jiraDeployment: user.jiraDeployment,
+        jiraHasToken: Boolean(user.jiraApiToken),
+      })
+      await prisma.user.update({
+        where: { id: user.id },
+        data: updateData,
+      })
+    }
 
     return NextResponse.json({ ok: true })
   } catch (error) {

@@ -14,7 +14,6 @@ import type { JiraIssue, JiraSprintEvent } from '@/lib/jira-sprints'
 import type { JiraCredentials } from '@/lib/jira-config'
 import { ensureSprintSnapshot } from '@/lib/sprint-snapshot'
 
-const CLOSED_CUTOFF_DATE = new Date(Date.UTC(2025, 0, 1))
 const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
 const MAX_SPRINTS_PER_TEAM_LIMIT = 50
 
@@ -260,22 +259,13 @@ export async function syncRecentClosedSprints(credentials?: JiraCredentials) {
     const sprintsPerTeamLimit = await getSprintsPerTeamLimit()
     const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
     const limitedClosedSprints = limitClosedSprintsByTeam(
-      closedSprints
-        .filter((sprint) => {
-          const endDate = getSprintEndDate(sprint)
-          return endDate && endDate >= CLOSED_CUTOFF_DATE
-        })
-        .sort(
-          (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
-        ),
+      closedSprints.sort(
+        (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
+      ),
       sprintsPerTeamLimit
     )
 
     for (const jiraSprint of limitedClosedSprints) {
-      const endDate = getSprintEndDate(jiraSprint)
-      if (!endDate || endDate < CLOSED_CUTOFF_DATE) {
-        continue
-      }
       const normalized = normalizeSprint(jiraSprint)
 
       const sprint = await prisma.sprint.upsert({
@@ -325,14 +315,9 @@ export async function syncAllClosedSprints(credentials?: JiraCredentials) {
     const sprintsPerTeamLimit = await getSprintsPerTeamLimit()
     const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
     const limitedClosedSprints = limitClosedSprintsByTeam(
-      closedSprints
-        .filter((sprint) => {
-          const endDate = getSprintEndDate(sprint)
-          return endDate && endDate >= CLOSED_CUTOFF_DATE
-        })
-        .sort(
-          (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
-        ),
+      closedSprints.sort(
+        (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
+      ),
       sprintsPerTeamLimit
     )
     const keepJiraIds = new Set(limitedClosedSprints.map((sprint) => sprint.id.toString()))
@@ -341,7 +326,6 @@ export async function syncAllClosedSprints(credentials?: JiraCredentials) {
       where: {
         status: { in: ['COMPLETED', 'CLOSED'] },
         jiraId: { notIn: Array.from(keepJiraIds) },
-        endDate: { gte: CLOSED_CUTOFF_DATE },
       },
     })
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { withAuth } from '@/lib/middleware'
+import { backupUserSettings } from '@/lib/settings-backup'
 
 export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
@@ -49,20 +50,28 @@ export const PUT = withAuth(async (req: NextRequest & { user?: any }) => {
       githubApiToken?: string | null
       githubConnectionStatus?: string | null
       githubConnectionCheckedAt?: Date | null
-    } = {
-      githubUser: normalizedUser || null,
-      githubConnectionStatus: null,
-      githubConnectionCheckedAt: null,
+    } = {}
+
+    if (normalizedUser) {
+      updateData.githubUser = normalizedUser
     }
 
     if (githubToken) {
       updateData.githubApiToken = githubToken
     }
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: updateData,
-    })
+    if (Object.keys(updateData).length > 0) {
+      updateData.githubConnectionStatus = null
+      updateData.githubConnectionCheckedAt = null
+      await backupUserSettings(user.id, {
+        githubUser: user.githubUser,
+        githubHasToken: Boolean(user.githubApiToken),
+      })
+      await prisma.user.update({
+        where: { id: user.id },
+        data: updateData,
+      })
+    }
 
     return NextResponse.json({ ok: true })
   } catch (error) {

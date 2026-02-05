@@ -44,14 +44,31 @@ model User {
   githubApiToken String?
   githubConnectionStatus String?
   githubConnectionCheckedAt DateTime?
+  openaiApiKey String?
+  openaiModel String?
+  openaiConnectionStatus String?
+  openaiConnectionCheckedAt DateTime?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
   // Relations
   scenarios DocumentationDraft[]
   testScenarios TestScenario[]
+  settingsBackups SettingsBackup[]
 
   @@map("users")
+}
+
+model SettingsBackup {
+  id        String   @id @default(cuid())
+  scope     String
+  userId    String?
+  payload   String
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("settings_backups")
 }
 
 model AdminSettings {
@@ -64,6 +81,8 @@ model AdminSettings {
   confluenceSearchLimit Int?
   confluenceAccessClientId String?
   confluenceAccessClientSecret String?
+  aiBaseUrl        String?
+  aiMaxTokens      Int?
   sprintsToSync    Int      @default(10)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt

@@ -378,6 +378,8 @@ export default function SprintsPage() {
     }
   }
 
+
+
   const fetchSprints = useCallback(async () => {
     try {
       const token = localStorage.getItem('token')
@@ -577,7 +579,7 @@ export default function SprintsPage() {
 
   return (
     <main className="h-screen overflow-hidden">
-      <div className="max-w-none w-full px-4 sm:px-6 lg:px-8 py-4 overflow-hidden h-full flex flex-col min-h-0">
+      <div className="max-w-none w-full px-4 sm:px-6 lg:px-8 py-4 overflow-hidden h-full flex flex-col min-h-0 overflow-x-hidden">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4 animate-fadeIn shrink-0">
           <div>
@@ -606,7 +608,7 @@ export default function SprintsPage() {
         </div>
 
         {/* Sprints List */}
-        <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-1 pb-4">
         {loading ? (
           <div className="text-center py-12">
             <div className="inline-block animate-spin">
@@ -677,11 +679,11 @@ export default function SprintsPage() {
               return (
                 <Card
                   key={teamKey}
-                  className="glass-card border-slate-700/30 transition-all duration-300 animate-slideInUp"
+                  className="glass-card border-slate-700/30 transition-all duration-300 animate-slideInUp h-[52vh] lg:h-[58vh] flex flex-col min-w-0 overflow-hidden"
                   style={{ animationDelay: `${teamIndex * 75}ms` }}
                 >
-                  <CardContent className="p-6">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-start lg:gap-6">
+                  <CardContent className="p-6 flex flex-col h-full min-h-0 min-w-0">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-start lg:gap-6 shrink-0 min-w-0">
                       <div>
                         <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Team</div>
                         <h2 className="text-2xl font-bold text-white">{teamKey}</h2>
@@ -723,7 +725,8 @@ export default function SprintsPage() {
                       </div>
                     </div>
 
-                    <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                    <div className="mt-5 flex-1 min-h-0 overflow-y-auto pr-2">
+                      <div className="grid gap-4 lg:grid-cols-2">
                       <div className="rounded-lg border border-slate-700/40 bg-slate-900/40 p-4 w-full">
                         <div className="text-xs text-slate-400">Current active sprint</div>
                         <div className="mt-2 text-white font-semibold">
@@ -863,11 +866,11 @@ export default function SprintsPage() {
                               className="flex-none w-full max-w-full sm:w-[70vw] md:w-[520px] lg:w-[calc(50%-0.5rem)] xl:w-[calc(50%-0.75rem)] snap-start"
                             >
                                 <Card 
-                                  className="glass-card border-slate-700/30 hover:border-blue-500/50 transition-all duration-300 group cursor-pointer animate-slideInUp"
+                                  className="glass-card border-slate-700/30 hover:border-blue-500/50 transition-all duration-300 group cursor-pointer animate-slideInUp h-full"
                                   style={{ animationDelay: `${idx * 50}ms` }}
                                 >
-                                  <CardContent className="p-6">
-                                    <div className="flex items-start justify-between gap-4">
+                                  <CardContent className="p-5 h-full flex flex-col min-h-0 min-w-0 overflow-x-hidden">
+                                    <div className="flex items-start justify-between gap-4 min-w-0">
                                       <div className="flex-1">
                                         <div className="flex items-center gap-3 mb-3">
                                           <h3 className="text-lg font-semibold text-white group-hover:text-blue-400 transition-colors">
@@ -1172,7 +1175,7 @@ export default function SprintsPage() {
                                 sortBySprint[sprint.id] || 'status'
                               )
                               return sorted.length ? (
-                                <div className="max-h-[300px] overflow-auto rounded-xl">
+                                <div className="max-h-[300px] overflow-auto rounded-xl max-w-full">
                                   <table className="min-w-full text-left text-sm">
                                     <thead className="text-xs uppercase text-slate-400 border-b border-slate-800/60 sticky top-0 bg-slate-950/80 backdrop-blur">
                                       <tr>
@@ -1309,6 +1312,7 @@ export default function SprintsPage() {
                           })
                         )}
                       </div>
+                    </div>
                     </div>
                   </CardContent>
                 </Card>

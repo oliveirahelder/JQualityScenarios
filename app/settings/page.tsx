@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { AlertCircle, CheckCircle2, Plug, BookOpen, GitBranch, Database } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Plug, BookOpen, GitBranch, Database, Sparkles } from 'lucide-react'
 
 interface JiraSettings {
   baseUrl: string
@@ -27,6 +27,13 @@ interface ConfluenceSettings {
 interface GithubSettings {
   user: string
   hasToken: boolean
+  connectionStatus?: string
+  connectionCheckedAt?: string
+}
+
+interface AiSettings {
+  model: string
+  hasApiKey: boolean
   connectionStatus?: string
   connectionCheckedAt?: string
 }
@@ -83,6 +90,20 @@ export default function SettingsPage() {
     hasToken: false,
   })
 
+  const [aiLoading, setAiLoading] = useState(true)
+  const [aiSaving, setAiSaving] = useState(false)
+  const [aiModelsLoading, setAiModelsLoading] = useState(false)
+  const [aiModels, setAiModels] = useState<string[]>([])
+  const [aiApiKey, setAiApiKey] = useState('')
+  const [aiModel, setAiModel] = useState('')
+  const [aiError, setAiError] = useState('')
+  const [aiSuccess, setAiSuccess] = useState('')
+  const [showAiConfig, setShowAiConfig] = useState(false)
+  const [aiSettings, setAiSettings] = useState<AiSettings>({
+    model: '',
+    hasApiKey: false,
+  })
+
   const [dbStatus, setDbStatus] = useState<'ok' | 'error' | 'checking'>('checking')
   const [adminJiraBaseUrl, setAdminJiraBaseUrl] = useState('')
   const [adminConfluenceBaseUrl, setAdminConfluenceBaseUrl] = useState('')
@@ -92,8 +113,12 @@ export default function SettingsPage() {
   const [adminConfluenceSearchLimit, setAdminConfluenceSearchLimit] = useState('10')
   const [adminConfluenceAccessClientId, setAdminConfluenceAccessClientId] = useState('')
   const [adminConfluenceAccessClientSecret, setAdminConfluenceAccessClientSecret] = useState('')
-  const [adminConfluenceAccessClientIdSet, setAdminConfluenceAccessClientIdSet] = useState(false)
-  const [adminConfluenceAccessClientSecretSet, setAdminConfluenceAccessClientSecretSet] = useState(false)
+  const [adminConfluenceAccessClientIdSet, setAdminConfluenceAccessClientIdSet] =
+    useState(false)
+  const [adminConfluenceAccessClientSecretSet, setAdminConfluenceAccessClientSecretSet] =
+    useState(false)
+  const [adminAiBaseUrl, setAdminAiBaseUrl] = useState('')
+  const [adminAiMaxTokens, setAdminAiMaxTokens] = useState('4096')
   const [adminSprintsToSync, setAdminSprintsToSync] = useState('10')
   const [adminSaving, setAdminSaving] = useState(false)
   const [adminError, setAdminError] = useState('')
@@ -104,6 +129,7 @@ export default function SettingsPage() {
   const [jiraLastSyncAt, setJiraLastSyncAt] = useState<string | null>(null)
   const jiraBaseUrlValue = jiraSettings.baseUrl || adminJiraBaseUrl
   const confluenceBaseUrlValue = confluenceSettings.baseUrl || adminConfluenceBaseUrl
+  const aiGatewayEnabled = Boolean(adminAiBaseUrl.trim())
 
   useEffect(() => {
     const storedUser = localStorage.getItem('user')
@@ -127,24 +153,33 @@ export default function SettingsPage() {
     const loadSettings = async () => {
       try {
         const authToken = localStorage.getItem('token')
-        const [jiraResponse, confluenceResponse, githubResponse, dbResponse, adminResponse] =
-          await Promise.all([
-            fetch('/api/integrations/jira', {
-              headers: { Authorization: `Bearer ${authToken}` },
-            }),
-            fetch('/api/integrations/confluence', {
-              headers: { Authorization: `Bearer ${authToken}` },
-            }),
-            fetch('/api/integrations/github', {
-              headers: { Authorization: `Bearer ${authToken}` },
-            }),
-            fetch('/api/system/database-status', {
-              headers: { Authorization: `Bearer ${authToken}` },
-            }),
-            fetch('/api/admin/settings', {
-              headers: { Authorization: `Bearer ${authToken}` },
-            }),
-          ])
+        const [
+          jiraResponse,
+          confluenceResponse,
+          githubResponse,
+          dbResponse,
+          adminResponse,
+          aiResponse,
+        ] = await Promise.all([
+          fetch('/api/integrations/jira', {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }),
+          fetch('/api/integrations/confluence', {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }),
+          fetch('/api/integrations/github', {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }),
+          fetch('/api/system/database-status', {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }),
+          fetch('/api/admin/settings', {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }),
+          fetch('/api/integrations/ai', {
+            headers: { Authorization: `Bearer ${authToken}` },
+          }),
+        ])
 
         if (!jiraResponse.ok) {
           const data = await jiraResponse.json()
@@ -186,6 +221,11 @@ export default function SettingsPage() {
           throw new Error(data.error || 'Failed to load GitHub settings')
         }
 
+        if (!aiResponse.ok) {
+          const data = await aiResponse.json()
+          throw new Error(data.error || 'Failed to load AI settings')
+        }
+
         if (!adminResponse.ok) {
           const data = await adminResponse.json()
           throw new Error(data.error || 'Failed to load admin settings')
@@ -202,6 +242,11 @@ export default function SettingsPage() {
             : '10'
         const nextAccessClientIdSet = Boolean(adminData?.confluenceAccessClientIdSet)
         const nextAccessClientSecretSet = Boolean(adminData?.confluenceAccessClientSecretSet)
+        const nextAdminAiBaseUrl = adminData?.aiBaseUrl || ''
+        const nextAdminAiMaxTokens =
+          typeof adminData?.aiMaxTokens === 'number'
+            ? adminData.aiMaxTokens.toString()
+            : '4096'
         const nextAdminSprintsToSync =
           typeof adminData?.sprintsToSync === 'number'
             ? adminData.sprintsToSync.toString()
@@ -216,6 +261,8 @@ export default function SettingsPage() {
         setAdminConfluenceAccessClientSecret('')
         setAdminConfluenceAccessClientIdSet(nextAccessClientIdSet)
         setAdminConfluenceAccessClientSecretSet(nextAccessClientSecretSet)
+        setAdminAiBaseUrl(nextAdminAiBaseUrl)
+        setAdminAiMaxTokens(nextAdminAiMaxTokens)
         setAdminSprintsToSync(nextAdminSprintsToSync)
         if (!jiraData?.baseUrl && nextAdminJiraBaseUrl) {
           setJiraSettings((prev) => ({ ...prev, baseUrl: nextAdminJiraBaseUrl }))
@@ -223,6 +270,15 @@ export default function SettingsPage() {
         if (!confluenceData?.baseUrl && nextAdminConfluenceBaseUrl) {
           setConfluenceSettings((prev) => ({ ...prev, baseUrl: nextAdminConfluenceBaseUrl }))
         }
+
+        const aiData = await aiResponse.json()
+        setAiSettings({
+          model: aiData?.model || '',
+          hasApiKey: Boolean(aiData?.hasApiKey),
+          connectionStatus: aiData?.connectionStatus || '',
+          connectionCheckedAt: aiData?.connectionCheckedAt || '',
+        })
+        setAiModel(aiData?.model || '')
 
         const githubData = await githubResponse.json()
         setGithubSettings(githubData)
@@ -243,6 +299,7 @@ export default function SettingsPage() {
         setJiraLoading(false)
         setConfluenceLoading(false)
         setGithubLoading(false)
+        setAiLoading(false)
       }
     }
 
@@ -547,6 +604,73 @@ export default function SettingsPage() {
     }
   }
 
+  const loadAiModels = async () => {
+    if (adminAiBaseUrl.trim()) {
+      setAiError('Model listing is not available for custom AI gateways.')
+      setAiModels([])
+      return
+    }
+    setAiModelsLoading(true)
+    setAiError('')
+    try {
+      const authToken = localStorage.getItem('token')
+      const response = await fetch('/api/integrations/ai/models', {
+        headers: { Authorization: `Bearer ${authToken}` },
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to load AI models')
+      }
+      const models = Array.isArray(data.models) ? data.models : []
+      setAiModels(models)
+      if (!aiModel && models.length > 0) {
+        setAiModel(models[0])
+      }
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : 'Failed to load AI models')
+    } finally {
+      setAiModelsLoading(false)
+    }
+  }
+
+  const saveAiSettings = async () => {
+    setAiSaving(true)
+    setAiError('')
+    setAiSuccess('')
+
+    try {
+      const authToken = localStorage.getItem('token')
+      const response = await fetch('/api/integrations/ai', {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          apiKey: aiApiKey.trim() || undefined,
+          model: aiModel.trim() || undefined,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to save AI settings')
+      }
+      setAiApiKey('')
+      setAiSettings((prev) => ({
+        ...prev,
+        hasApiKey: prev.hasApiKey || Boolean(aiApiKey),
+        model: aiModel.trim(),
+      }))
+      setAiSuccess('AI settings saved.')
+      return true
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : 'Failed to save AI settings')
+      return false
+    } finally {
+      setAiSaving(false)
+    }
+  }
+
   const handleAdminSave = async () => {
     setAdminSaving(true)
     setAdminError('')
@@ -560,6 +684,10 @@ export default function SettingsPage() {
       const parsedConfluenceSearchLimit = Number.parseInt(adminConfluenceSearchLimit, 10)
       const normalizedConfluenceSearchLimit = Number.isFinite(parsedConfluenceSearchLimit)
         ? parsedConfluenceSearchLimit
+        : undefined
+      const parsedAiMaxTokens = Number.parseInt(adminAiMaxTokens, 10)
+      const normalizedAiMaxTokens = Number.isFinite(parsedAiMaxTokens)
+        ? parsedAiMaxTokens
         : undefined
       const normalizedAccessClientId = adminConfluenceAccessClientId.trim()
       const normalizedAccessClientSecret = adminConfluenceAccessClientSecret.trim()
@@ -579,6 +707,8 @@ export default function SettingsPage() {
           confluenceSearchLimit: normalizedConfluenceSearchLimit,
           confluenceAccessClientId: normalizedAccessClientId || undefined,
           confluenceAccessClientSecret: normalizedAccessClientSecret || undefined,
+          aiBaseUrl: adminAiBaseUrl,
+          aiMaxTokens: normalizedAiMaxTokens,
           sprintsToSync: normalizedSprintsToSync,
         }),
       })
@@ -1028,6 +1158,110 @@ export default function SettingsPage() {
                   </>
                 )}
               </div>
+
+              <div className="mt-6 pt-6 border-t border-slate-700/30">
+                <div className="flex items-center gap-2 text-slate-300 text-sm mb-4">
+                  <Sparkles className="w-4 h-4 text-blue-400" />
+                  Configure AI (per user)
+                </div>
+                {aiLoading ? (
+                  <div className="text-slate-400 text-sm">Loading AI settings...</div>
+                ) : (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full text-slate-300 hover:text-white hover:bg-slate-800/50 border-slate-700"
+                      onClick={() => setShowAiConfig((prev) => !prev)}
+                    >
+                      {showAiConfig ? 'Hide AI Settings' : 'Open AI Settings'}
+                    </Button>
+                    {showAiConfig && (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault()
+                          void saveAiSettings()
+                        }}
+                        className="space-y-3 mt-4"
+                      >
+                        <Input
+                          type="password"
+                          placeholder={
+                            aiSettings.hasApiKey
+                              ? 'API key stored (optional)'
+                              : 'OpenAI API key'
+                          }
+                          value={aiApiKey}
+                          onChange={(e) => setAiApiKey(e.target.value)}
+                          className="bg-slate-800/50 border-slate-700"
+                        />
+
+                        {aiModels.length > 0 ? (
+                          <select
+                            className="w-full rounded-md border border-slate-700 bg-slate-800/50 px-3 py-2 text-sm text-slate-200"
+                            value={aiModel}
+                            onChange={(e) => setAiModel(e.target.value)}
+                          >
+                            {aiModels.map((model) => (
+                              <option key={model} value={model}>
+                                {model}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <Input
+                            placeholder="OpenAI model (e.g. gpt-4o-mini)"
+                            value={aiModel}
+                            onChange={(e) => setAiModel(e.target.value)}
+                            className="bg-slate-800/50 border-slate-700"
+                          />
+                        )}
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full border-slate-700 text-slate-300"
+                          onClick={loadAiModels}
+                          disabled={aiModelsLoading || aiGatewayEnabled}
+                        >
+                          {aiGatewayEnabled
+                            ? 'Model list disabled'
+                            : aiModelsLoading
+                              ? 'Loading models...'
+                              : 'Load models'}
+                        </Button>
+
+                        <div className="text-xs text-slate-400">
+                          {aiGatewayEnabled
+                            ? 'Model listing is unavailable when using a custom AI gateway.'
+                            : 'Uses your API key to list available models.'}
+                        </div>
+
+                        {aiError && (
+                          <div className="flex items-center gap-2 text-xs text-red-300">
+                            <AlertCircle className="w-4 h-4" />
+                            <span>{aiError}</span>
+                          </div>
+                        )}
+                        {aiSuccess && (
+                          <div className="flex items-center gap-2 text-xs text-green-300">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>{aiSuccess}</span>
+                          </div>
+                        )}
+
+                        <Button
+                          type="submit"
+                          disabled={aiSaving}
+                          className="w-full btn-glow bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600"
+                        >
+                          {aiSaving ? 'Saving...' : 'Save AI Settings'}
+                        </Button>
+                      </form>
+                    )}
+                  </>
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -1119,6 +1353,33 @@ export default function SettingsPage() {
                   You can paste a full page URL for the parent page ID. Optional CQL lets you
                   pre-filter content types for faster searches.
                 </p>
+                <div className="space-y-2">
+                  <Input
+                    placeholder="AI Gateway Base URL (optional)"
+                    value={adminAiBaseUrl}
+                    onChange={(e) => setAdminAiBaseUrl(e.target.value)}
+                    className="bg-slate-800/50 border-slate-700"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    If set, AI requests use this gateway and model listing is disabled. Users
+                    should type the model manually.
+                  </p>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-400 mb-2">AI Max Tokens</div>
+                  <Input
+                    type="number"
+                    min={256}
+                    max={16384}
+                    placeholder="4096"
+                    value={adminAiMaxTokens}
+                    onChange={(e) => setAdminAiMaxTokens(e.target.value)}
+                    className="bg-slate-800/50 border-slate-700"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Used for scenario generation. Larger values may slow responses.
+                  </p>
+                </div>
                 <div>
                   <div className="text-xs text-slate-400 mb-2">
                     Nr Sprints to Sync (metrics will be based on this)

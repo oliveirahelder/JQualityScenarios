@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { withAuth } from '@/lib/middleware'
 import { normalizeConfluenceBaseUrl } from '@/lib/confluence-config'
+import { backupUserSettings } from '@/lib/settings-backup'
 
 export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
@@ -86,10 +87,18 @@ export const PUT = withAuth(async (req: NextRequest & { user?: any }) => {
       updateData.confluenceConnectionCheckedAt = null
     }
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: updateData,
-    })
+    if (Object.keys(updateData).length > 0) {
+      await backupUserSettings(user.id, {
+        confluenceBaseUrl: user.confluenceBaseUrl,
+        confluenceAuthType: user.confluenceAuthType,
+        confluenceDeployment: user.confluenceDeployment,
+        confluenceHasToken: Boolean(user.confluenceApiToken),
+      })
+      await prisma.user.update({
+        where: { id: user.id },
+        data: updateData,
+      })
+    }
 
     return NextResponse.json({ ok: true })
   } catch (error) {
