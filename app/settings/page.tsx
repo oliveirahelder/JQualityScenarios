@@ -124,6 +124,7 @@ export default function SettingsPage() {
   const [adminGithubBaseUrl, setAdminGithubBaseUrl] = useState('')
   const [adminGithubOrgTokens, setAdminGithubOrgTokens] = useState('')
   const [adminGithubOrgTokensSet, setAdminGithubOrgTokensSet] = useState(false)
+  const [adminDataGithubOrgTokensMask, setAdminDataGithubOrgTokensMask] = useState('')
   const [adminAiBaseUrl, setAdminAiBaseUrl] = useState('')
   const [adminAiMaxTokens, setAdminAiMaxTokens] = useState('')
   const [adminSprintsToSync, setAdminSprintsToSync] = useState('10')
