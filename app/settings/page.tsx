@@ -81,6 +81,7 @@ export default function SettingsPage() {
   const [githubSaving, setGithubSaving] = useState(false)
   const [githubTesting, setGithubTesting] = useState(false)
   const [githubToken, setGithubToken] = useState('')
+  const [githubMaskedToken, setGithubMaskedToken] = useState<string | null>(null)
   const [githubError, setGithubError] = useState('')
   const [githubSuccess, setGithubSuccess] = useState('')
   const [githubTestResult, setGithubTestResult] = useState<string | null>(null)
@@ -565,6 +566,14 @@ export default function SettingsPage() {
       }
 
       setGithubToken('')
+      if (githubToken) {
+        const token = githubToken.trim()
+        const masked =
+          token.length <= 8
+            ? token
+            : `${token.slice(0, 4)}…${token.slice(-4)}`
+        setGithubMaskedToken(masked)
+      }
       setGithubSettings((prev) => ({ ...prev, hasToken: prev.hasToken || Boolean(githubToken) }))
       setGithubSuccess('GitHub connected.')
       setGithubTestOk(null)
@@ -1142,7 +1151,11 @@ export default function SettingsPage() {
                         <Input
                           type="password"
                           placeholder={
-                            githubSettings.hasToken ? 'Token stored (optional)' : 'GitHub token'
+                            githubSettings.hasToken
+                              ? githubMaskedToken
+                                ? `Token stored (${githubMaskedToken})`
+                                : 'Token stored (optional)'
+                              : 'GitHub token'
                           }
                           value={githubToken}
                           onChange={(e) => setGithubToken(e.target.value)}
@@ -1357,7 +1370,7 @@ export default function SettingsPage() {
                   <Textarea
                     placeholder={
                       adminGithubOrgTokensSet
-                        ? 'Tokens stored (leave blank to keep)'
+                        ? 'Tokens stored (leave blank to keep; masked below)'
                         : 'ghp_xxx or ghep_xxx (one per line)'
                     }
                     value={adminGithubOrgTokens}
@@ -1367,8 +1380,13 @@ export default function SettingsPage() {
                   />
                   <p className="text-[11px] text-slate-500">
                     Usado como fallback se o token do utilizador não tiver acesso ao PR. Autoriza os
-                    tokens no SSO de cada organização.
+                    tokens no SSO de cada organização. Apenas é mostrado o início/fim para conferência.
                   </p>
+                  {adminGithubOrgTokensSet && (
+                    <p className="text-[11px] text-slate-400">
+                      (Tokens armazenados; valores reais não são exibidos)
+                    </p>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <Input
