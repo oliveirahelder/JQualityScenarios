@@ -55,6 +55,7 @@ model User {
   scenarios DocumentationDraft[]
   testScenarios TestScenario[]
   settingsBackups SettingsBackup[]
+  documentationAttachments DocumentationAttachment[]
 
   @@map("users")
 }
@@ -171,6 +172,7 @@ model Ticket {
   testScenarios TestScenario[]
   documentationDraft DocumentationDraft?
   documentationDraftLinks DocumentationDraftTicket[]
+  documentationAttachments DocumentationAttachment[]
 
   @@map("tickets")
   @@index([sprintId])
@@ -259,6 +261,8 @@ model DocumentationDraft {
   
   confluencePageId String?
   confluenceUrl String?
+
+  attachments DocumentationAttachment[]
   
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
@@ -266,6 +270,32 @@ model DocumentationDraft {
   @@map("documentation_drafts")
   @@index([sprintId])
   @@index([ticketId])
+  @@index([userId])
+}
+
+// DocumentationAttachment model - PDF context attached to a ticket/draft
+model DocumentationAttachment {
+  id        String   @id @default(cuid())
+  jiraId    String
+  ticketId  String?
+  ticket    Ticket?  @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  draftId   String?
+  draft     DocumentationDraft? @relation(fields: [draftId], references: [id], onDelete: SetNull)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  filename  String
+  mimeType  String
+  size      Int
+  content   Bytes
+  textContent String?
+
+  createdAt DateTime @default(now())
+
+  @@map("documentation_attachments")
+  @@index([jiraId])
+  @@index([ticketId])
+  @@index([draftId])
   @@index([userId])
 }
 

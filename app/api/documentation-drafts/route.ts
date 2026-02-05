@@ -98,6 +98,12 @@ export const POST = withAuth(
             linkedTickets: { include: { ticket: true } },
           },
         })
+
+        await prisma.documentationAttachment.updateMany({
+          where: { ticketId: ticket.id, userId: payload.userId },
+          data: { draftId: draft.id },
+        })
+
         return NextResponse.json({ draft, updated: true }, { status: 200 })
       }
 
@@ -141,6 +147,11 @@ export const POST = withAuth(
           })
         }
 
+        await prisma.documentationAttachment.updateMany({
+          where: { ticketId: ticket.id, userId: payload.userId },
+          data: { draftId: draft.id },
+        })
+
         return NextResponse.json({ draft, updated: true }, { status: 200 })
       }
 
@@ -161,6 +172,11 @@ export const POST = withAuth(
           sprint: true,
           linkedTickets: { include: { ticket: true } },
         },
+      })
+
+      await prisma.documentationAttachment.updateMany({
+        where: { ticketId: ticket.id, userId: payload.userId },
+        data: { draftId: draft.id },
       })
 
       return NextResponse.json({ draft, updated: false }, { status: 201 })

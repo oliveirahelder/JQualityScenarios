@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,15 @@ type ManualScenario = {
   expectedResult: string
   actualResult?: string
   notes?: string
+}
+
+type Attachment = {
+  id: string
+  filename: string
+  size: number
+  mimeType: string
+  createdAt: string
+  hasText: boolean
 }
 
 type ScenarioResult = {
@@ -41,6 +50,76 @@ export default function GenerateScenariosPage() {
   const [saveError, setSaveError] = useState('')
   const [saving, setSaving] = useState(false)
   const [copied, setCopied] = useState<number | null>(null)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [attachmentsLoading, setAttachmentsLoading] = useState(false)
+  const [attachmentsError, setAttachmentsError] = useState('')
+
+  const loadAttachments = async (currentTicketId: string) => {
+    setAttachmentsLoading(true)
+    setAttachmentsError('')
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch(
+        `/api/scenarios/attachments?ticketId=${encodeURIComponent(currentTicketId)}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        }
+      )
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to load attachments')
+      }
+      const data = await response.json()
+      setAttachments(data.attachments || [])
+    } catch (err) {
+      setAttachmentsError(err instanceof Error ? err.message : 'Failed to load attachments')
+    } finally {
+      setAttachmentsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!ticketId) {
+      setAttachments([])
+      return
+    }
+    loadAttachments(ticketId)
+  }, [ticketId])
+
+  const handleAttachmentUpload = async (file: File) => {
+    if (!ticketId) {
+      setAttachmentsError('Add the Jira ticket ID before uploading files.')
+      return
+    }
+    setAttachmentsLoading(true)
+    setAttachmentsError('')
+    try {
+      const token = localStorage.getItem('token')
+      const formData = new FormData()
+      formData.append('ticketId', ticketId)
+      formData.append('file', file)
+      const response = await fetch('/api/scenarios/attachments', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to upload attachment')
+      }
+      await loadAttachments(ticketId)
+    } catch (err) {
+      setAttachmentsError(err instanceof Error ? err.message : 'Failed to upload attachment')
+    } finally {
+      setAttachmentsLoading(false)
+    }
+  }
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -237,13 +316,55 @@ export default function GenerateScenariosPage() {
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-slate-300">Documentation (Optional)</label>
                     <Textarea
-              placeholder="Paste any relevant documentation, context, or PR links..."
+                      placeholder="Paste any relevant documentation, context, or PR links..."
                       value={confluence}
                       onChange={(e) => setConfluence(e.target.value)}
                       disabled={loading}
                       rows={5}
                       className="bg-slate-800/50 border-slate-700 resize-none"
                     />
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                      <Input
+                        type="file"
+                        accept="application/pdf"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0]
+                          if (file) {
+                            handleAttachmentUpload(file)
+                          }
+                          event.currentTarget.value = ''
+                        }}
+                        className="bg-slate-800/50 border-slate-700 text-slate-200 file:bg-slate-700 file:text-slate-200"
+                      />
+                      <span>PDF only · max 20MB · up to 5 files</span>
+                      {attachmentsLoading && <span className="text-slate-300">Uploading...</span>}
+                    </div>
+                    {attachmentsError && (
+                      <div className="flex items-center gap-2 text-xs text-red-300">
+                        <AlertCircle className="w-4 h-4" />
+                        <span>{attachmentsError}</span>
+                      </div>
+                    )}
+                    {attachments.length > 0 && (
+                      <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3 text-xs text-slate-300">
+                        <div className="flex items-center justify-between text-slate-400">
+                          <span>Attachments ({attachments.length}/5)</span>
+                          <span>
+                            Context extracted: {attachments.filter((att) => att.hasText).length}
+                          </span>
+                        </div>
+                        <div className="mt-2 space-y-1">
+                          {attachments.map((attachment) => (
+                            <div key={attachment.id} className="flex items-center justify-between">
+                              <span className="truncate">{attachment.filename}</span>
+                              <span className="text-[11px] text-slate-400">
+                                {(attachment.size / (1024 * 1024)).toFixed(1)} MB
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {error && (

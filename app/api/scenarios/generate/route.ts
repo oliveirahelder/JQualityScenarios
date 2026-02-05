@@ -31,6 +31,7 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
       summary: string | null
       devInsights: Array<{ prUrl: string | null; prTitle: string | null; prNotes: string | null }>
     } | null = null
+    let attachmentsContext = ''
 
     // Fetch Jira ticket details
     if (ticketId) {
@@ -145,6 +146,22 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
       if (pullRequests.length > 0) {
         jiraDetails.pullRequests = pullRequests
       }
+
+      const attachments = await prisma.documentationAttachment.findMany({
+        where: { jiraId: ticketId, userId: payload.userId },
+        select: { filename: true, textContent: true },
+        orderBy: { createdAt: 'desc' },
+      })
+
+      if (attachments.length > 0) {
+        attachmentsContext = attachments
+          .map((attachment, index) => {
+            const header = `Attachment ${index + 1}: ${attachment.filename}`
+            const body = attachment.textContent?.trim() || ''
+            return [header, body].filter(Boolean).join('\n')
+          })
+          .join('\n\n')
+      }
     } else if (xmlText) {
       const parsed = await parseJiraXml(xmlText)
       if (parsed.length === 0) {
@@ -169,7 +186,9 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
           : undefined,
     }
 
-    const generated = await generateScenariosWithAI(jiraDetails, confluence, aiConfig)
+    const confluenceContext = [confluence, attachmentsContext].filter(Boolean).join('\n\n')
+
+    const generated = await generateScenariosWithAI(jiraDetails, confluenceContext, aiConfig)
 
     return NextResponse.json({
       jiraDetails,
