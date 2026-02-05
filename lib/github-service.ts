@@ -57,7 +57,7 @@ export async function getPullRequest(
   prNumber: number,
   tokenOverride?: string | null,
   baseUrlOverride?: string | null
-): Promise<GitHubPR> {
+): Promise<GitHubPR | null> {
   try {
     const token = tokenOverride || process.env.GITHUB_TOKEN
 
@@ -111,6 +111,18 @@ export async function getPullRequest(
       diff,
     }
   } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status
+      if (status === 401 || status === 403 || status === 404) {
+        console.warn('[GitHub] PR not accessible with current token:', {
+          owner,
+          repo,
+          prNumber,
+          status,
+        })
+        return null
+      }
+    }
     console.error('[GitHub] Error fetching PR:', error)
     throw new Error('Failed to fetch pull request')
   }
