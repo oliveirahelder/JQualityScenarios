@@ -119,6 +119,9 @@ export default function SettingsPage() {
     useState(false)
   const [adminConfluenceAccessClientSecretSet, setAdminConfluenceAccessClientSecretSet] =
     useState(false)
+  const [adminGithubBaseUrl, setAdminGithubBaseUrl] = useState('')
+  const [adminGithubOrgTokens, setAdminGithubOrgTokens] = useState('')
+  const [adminGithubOrgTokensSet, setAdminGithubOrgTokensSet] = useState(false)
   const [adminAiBaseUrl, setAdminAiBaseUrl] = useState('')
   const [adminAiMaxTokens, setAdminAiMaxTokens] = useState('')
   const [adminSprintsToSync, setAdminSprintsToSync] = useState('10')
@@ -244,6 +247,8 @@ export default function SettingsPage() {
             : '10'
         const nextAccessClientIdSet = Boolean(adminData?.confluenceAccessClientIdSet)
         const nextAccessClientSecretSet = Boolean(adminData?.confluenceAccessClientSecretSet)
+        const nextAdminGithubBaseUrl = adminData?.githubBaseUrl || ''
+        const nextAdminGithubOrgTokensSet = Boolean(adminData?.githubOrgTokensSet)
         const nextAdminAiBaseUrl = adminData?.aiBaseUrl || ''
         const nextAdminAiMaxTokens =
           typeof adminData?.aiMaxTokens === 'number'
@@ -263,6 +268,9 @@ export default function SettingsPage() {
         setAdminConfluenceAccessClientSecret('')
         setAdminConfluenceAccessClientIdSet(nextAccessClientIdSet)
         setAdminConfluenceAccessClientSecretSet(nextAccessClientSecretSet)
+        setAdminGithubBaseUrl(nextAdminGithubBaseUrl)
+        setAdminGithubOrgTokens('')
+        setAdminGithubOrgTokensSet(nextAdminGithubOrgTokensSet)
         setAdminAiBaseUrl(nextAdminAiBaseUrl)
         setAdminAiMaxTokens(nextAdminAiMaxTokens)
         setAdminSprintsToSync(nextAdminSprintsToSync)
@@ -696,6 +704,11 @@ export default function SettingsPage() {
             : undefined
       const normalizedAccessClientId = adminConfluenceAccessClientId.trim()
       const normalizedAccessClientSecret = adminConfluenceAccessClientSecret.trim()
+      const normalizedGithubOrgTokens = adminGithubOrgTokens
+        .split(/\r?\n+/)
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .join('\n')
       const authToken = localStorage.getItem('token')
       const response = await fetch('/api/admin/settings', {
         method: 'PUT',
@@ -712,6 +725,8 @@ export default function SettingsPage() {
           confluenceSearchLimit: normalizedConfluenceSearchLimit,
           confluenceAccessClientId: normalizedAccessClientId || undefined,
           confluenceAccessClientSecret: normalizedAccessClientSecret || undefined,
+          githubBaseUrl: adminGithubBaseUrl,
+          githubOrgTokens: normalizedGithubOrgTokens || undefined,
           aiBaseUrl: adminAiBaseUrl,
           aiMaxTokens: normalizedAiMaxTokens,
           sprintsToSync: normalizedSprintsToSync,
@@ -732,6 +747,10 @@ export default function SettingsPage() {
       if (normalizedAccessClientSecret) {
         setAdminConfluenceAccessClientSecretSet(true)
         setAdminConfluenceAccessClientSecret('')
+      }
+      if (normalizedGithubOrgTokens) {
+        setAdminGithubOrgTokensSet(true)
+        setAdminGithubOrgTokens('')
       }
       setAdminSuccess('Admin settings updated.')
     } catch (err) {
@@ -1324,6 +1343,32 @@ export default function SettingsPage() {
                   onChange={(e) => setAdminConfluenceBaseUrl(e.target.value)}
                   className="bg-slate-800/50 border-slate-700"
                 />
+                <Input
+                  placeholder="GitHub Base URL (e.g. https://github.com or https://github.jumia.com)"
+                  value={adminGithubBaseUrl}
+                  onChange={(e) => setAdminGithubBaseUrl(e.target.value)}
+                  className="bg-slate-800/50 border-slate-700"
+                />
+                <div className="space-y-2">
+                  <label className="text-xs text-slate-400">
+                    GitHub Org Tokens (one per line, optional)
+                  </label>
+                  <Textarea
+                    placeholder={
+                      adminGithubOrgTokensSet
+                        ? 'Tokens stored (leave blank to keep)'
+                        : 'ghp_xxx or ghep_xxx (one per line)'
+                    }
+                    value={adminGithubOrgTokens}
+                    onChange={(e) => setAdminGithubOrgTokens(e.target.value)}
+                    rows={3}
+                    className="bg-slate-800/50 border-slate-700 resize-none"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Usado como fallback se o token do utilizador não tiver acesso ao PR. Autoriza os
+                    tokens no SSO de cada organização.
+                  </p>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <Input
                     placeholder="Confluence Space Key (e.g. NAFAMZ)"

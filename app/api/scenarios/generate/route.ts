@@ -7,6 +7,7 @@ import {
 } from '@/lib/jira-service'
 import { prisma } from '@/lib/prisma'
 import { buildJiraCredentialsFromUser } from '@/lib/jira-config'
+import { extractPullRequestUrls, getPullRequestFromUrl } from '@/lib/github-service'
 
 export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
@@ -60,12 +61,85 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
           },
         },
       })
-      if (existingTicket?.devInsights?.length) {
-        jiraDetails.pullRequests = existingTicket.devInsights.map((insight) => ({
-          url: insight.prUrl,
-          title: insight.prTitle,
-          notes: insight.prNotes,
-        }))
+      const pullRequestsFromDb = existingTicket?.devInsights?.length
+        ? existingTicket.devInsights
+            .map((insight) => ({
+              url: insight.prUrl,
+              title: insight.prTitle,
+              notes: insight.prNotes,
+            }))
+            .filter((pr) => pr.url || pr.title || pr.notes)
+        : []
+
+      const prUrlsFromTicket = extractPullRequestUrls(
+        [jiraDetails.description, jiraDetails.comments].filter(Boolean).join('\n')
+      )
+
+      const prUrls = Array.from(
+        new Set([
+          ...pullRequestsFromDb.map((pr) => pr.url).filter(Boolean),
+          ...prUrlsFromTicket,
+        ])
+      )
+
+      const pullRequests: Array<{
+        url?: string | null
+        title?: string | null
+        notes?: string | null
+        author?: string | null
+        createdAt?: string | null
+        updatedAt?: string | null
+        additions?: number | null
+        deletions?: number | null
+        commits?: number | null
+        files?: string[]
+      }> = [...pullRequestsFromDb]
+
+      const orgTokens: string[] =
+        adminSettings?.githubOrgTokens
+          ?.split(/\r?\n+/)
+          .map((t) => t.trim())
+          .filter(Boolean) || []
+
+      if (prUrls.length > 0) {
+        for (const url of prUrls) {
+          if (pullRequests.some((pr) => pr.url === url)) {
+            continue
+          }
+          let prDetails = user.githubApiToken
+            ? await getPullRequestFromUrl(url, user.githubApiToken, adminSettings?.githubBaseUrl || null)
+            : null
+          if (!prDetails && orgTokens.length > 0) {
+            for (const token of orgTokens) {
+              prDetails = await getPullRequestFromUrl(
+                url,
+                token,
+                adminSettings?.githubBaseUrl || null
+              )
+              if (prDetails) break
+            }
+          }
+          if (prDetails) {
+            pullRequests.push({
+              url: prDetails.url,
+              title: prDetails.title,
+              notes: prDetails.body,
+              author: prDetails.author,
+              createdAt: prDetails.createdAt,
+              updatedAt: prDetails.updatedAt,
+              additions: prDetails.additions,
+              deletions: prDetails.deletions,
+              commits: prDetails.commits,
+              files: prDetails.files,
+            })
+          } else {
+            pullRequests.push({ url })
+          }
+        }
+      }
+
+      if (pullRequests.length > 0) {
+        jiraDetails.pullRequests = pullRequests
       }
     } else if (xmlText) {
       const parsed = await parseJiraXml(xmlText)

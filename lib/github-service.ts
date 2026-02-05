@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const GITHUB_API_URL = 'https://api.github.com'
+const DEFAULT_GITHUB_API_URL = 'https://api.github.com'
 
 export interface GitHubPR {
   number: number
@@ -27,21 +27,48 @@ export interface PullRequestDiff {
 /**
  * Fetch pull request details from GitHub
  */
+export const normalizeGithubApiUrl = (baseUrl?: string | null) => {
+  if (!baseUrl) return null
+  const trimmed = baseUrl.trim().replace(/\/+$/, '')
+  if (!trimmed) return null
+  if (/\/api\/v3$/i.test(trimmed)) return trimmed
+  return `${trimmed}/api/v3`
+}
+
+export const resolveGithubApiUrl = (baseUrl?: string | null, prUrl?: string | null) => {
+  const normalized = normalizeGithubApiUrl(baseUrl)
+  if (normalized) return normalized
+  if (prUrl) {
+    try {
+      const parsed = new URL(prUrl)
+      if (parsed.hostname && parsed.hostname.toLowerCase() !== 'github.com') {
+        return normalizeGithubApiUrl(`${parsed.protocol}//${parsed.host}`)
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return DEFAULT_GITHUB_API_URL
+}
+
 export async function getPullRequest(
   owner: string,
   repo: string,
-  prNumber: number
+  prNumber: number,
+  tokenOverride?: string | null,
+  baseUrlOverride?: string | null
 ): Promise<GitHubPR> {
   try {
-    const token = process.env.GITHUB_TOKEN
+    const token = tokenOverride || process.env.GITHUB_TOKEN
 
     if (!token) {
       throw new Error('GitHub token not configured')
     }
+    const apiBaseUrl = resolveGithubApiUrl(baseUrlOverride, null)
 
     // Fetch PR details
     const prResponse = await axios.get(
-      `${GITHUB_API_URL}/repos/${owner}/${repo}/pulls/${prNumber}`,
+      `${apiBaseUrl}/repos/${owner}/${repo}/pulls/${prNumber}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -54,7 +81,7 @@ export async function getPullRequest(
 
     // Fetch PR files and diff
     const filesResponse = await axios.get(
-      `${GITHUB_API_URL}/repos/${owner}/${repo}/pulls/${prNumber}/files`,
+      `${apiBaseUrl}/repos/${owner}/${repo}/pulls/${prNumber}/files`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -86,6 +113,64 @@ export async function getPullRequest(
   } catch (error) {
     console.error('[GitHub] Error fetching PR:', error)
     throw new Error('Failed to fetch pull request')
+  }
+}
+
+export function extractPullRequestUrls(text?: string | null): string[] {
+  if (!text) return []
+  const urls: string[] = []
+  const regex = /https?:\/\/[^\s)]+/gi
+  const matches = text.match(regex) || []
+  for (const raw of matches) {
+    const cleaned = raw.replace(/[),.;]+$/, '')
+    if (/\/pull\/\d+/i.test(cleaned)) {
+      urls.push(cleaned)
+    }
+  }
+  return Array.from(new Set(urls))
+}
+
+export function parsePullRequestUrl(url: string): { owner: string; repo: string; number: number } | null {
+  try {
+    const parsed = new URL(url)
+    const parts = parsed.pathname.split('/').filter(Boolean)
+    const pullIndex = parts.findIndex((part) => part.toLowerCase() === 'pull')
+    if (pullIndex === -1 || pullIndex + 1 >= parts.length) return null
+    const owner = parts[0]
+    const repo = parts[1]
+    const number = Number.parseInt(parts[pullIndex + 1], 10)
+    if (!owner || !repo || !Number.isFinite(number)) return null
+    return { owner, repo, number }
+  } catch {
+    return null
+  }
+}
+
+export async function getPullRequestFromUrl(
+  url: string,
+  tokenOverride?: string | null,
+  baseUrlOverride?: string | null
+): Promise<GitHubPR | null> {
+  const parsed = parsePullRequestUrl(url)
+  if (!parsed) return null
+  try {
+    return await getPullRequest(
+      parsed.owner,
+      parsed.repo,
+      parsed.number,
+      tokenOverride,
+      baseUrlOverride || url
+    )
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status
+      if (status === 401 || status === 403 || status === 404) {
+        console.warn('[GitHub] PR not accessible with current token:', url)
+        return null
+      }
+    }
+    console.error('[GitHub] Error fetching PR from URL:', error)
+    return null
   }
 }
 

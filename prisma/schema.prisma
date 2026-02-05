@@ -81,6 +81,8 @@ model AdminSettings {
   confluenceSearchLimit Int?
   confluenceAccessClientId String?
   confluenceAccessClientSecret String?
+  githubBaseUrl    String?
+  githubOrgTokens  String?
   aiBaseUrl        String?
   aiMaxTokens      Int?
   sprintsToSync    Int      @default(10)

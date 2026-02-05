@@ -20,6 +20,8 @@ export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
       confluenceSearchLimit: settings?.confluenceSearchLimit ?? 10,
       confluenceAccessClientIdSet: Boolean(settings?.confluenceAccessClientId),
       confluenceAccessClientSecretSet: Boolean(settings?.confluenceAccessClientSecret),
+      githubBaseUrl: settings?.githubBaseUrl || '',
+      githubOrgTokensSet: Boolean(settings?.githubOrgTokens),
       aiBaseUrl: settings?.aiBaseUrl || '',
       aiMaxTokens: settings?.aiMaxTokens ?? null,
       sprintsToSync: settings?.sprintsToSync ?? 10,
@@ -43,6 +45,8 @@ export const PUT = withAuth(
         confluenceSearchLimit,
         confluenceAccessClientId,
         confluenceAccessClientSecret,
+        githubBaseUrl,
+        githubOrgTokens,
         aiBaseUrl,
         aiMaxTokens,
       } = await req.json()
@@ -112,6 +116,18 @@ export const PUT = withAuth(
       confluenceAccessClientSecret.trim()
         ? confluenceAccessClientSecret.trim()
         : undefined
+    const normalizedGithubBaseUrl =
+      typeof githubBaseUrl === 'string' && githubBaseUrl.trim()
+        ? githubBaseUrl.trim().replace(/\/+$/, '')
+        : undefined
+    const normalizedGithubOrgTokens =
+      typeof githubOrgTokens === 'string'
+        ? githubOrgTokens
+            .split(/\r?\n+/)
+            .map((t: string) => t.trim())
+            .filter(Boolean)
+            .join('\n') || null
+        : undefined
     const normalizedAiBaseUrl =
       typeof aiBaseUrl === 'string' && aiBaseUrl.trim()
         ? aiBaseUrl.trim().replace(/\/+$/, '')
@@ -143,6 +159,8 @@ export const PUT = withAuth(
       if (normalizedAccessClientId) updateData.confluenceAccessClientId = normalizedAccessClientId
       if (normalizedAccessClientSecret)
         updateData.confluenceAccessClientSecret = normalizedAccessClientSecret
+      if (normalizedGithubBaseUrl !== undefined) updateData.githubBaseUrl = normalizedGithubBaseUrl
+      if (normalizedGithubOrgTokens !== undefined) updateData.githubOrgTokens = normalizedGithubOrgTokens
       if (normalizedAiBaseUrl !== undefined) updateData.aiBaseUrl = normalizedAiBaseUrl
       if (normalizedAiMaxTokens !== undefined) updateData.aiMaxTokens = normalizedAiMaxTokens
       if (normalizedSprintsToSync !== undefined) updateData.sprintsToSync = normalizedSprintsToSync
@@ -157,6 +175,8 @@ export const PUT = withAuth(
           confluenceSearchLimit: existing.confluenceSearchLimit,
           confluenceAccessClientId: existing.confluenceAccessClientId ? 'stored' : null,
           confluenceAccessClientSecret: existing.confluenceAccessClientSecret ? 'stored' : null,
+          githubBaseUrl: existing.githubBaseUrl,
+          githubOrgTokens: existing.githubOrgTokens ? 'stored' : null,
           aiBaseUrl: existing.aiBaseUrl,
           aiMaxTokens: existing.aiMaxTokens,
           sprintsToSync: existing.sprintsToSync,
@@ -177,6 +197,8 @@ export const PUT = withAuth(
           confluenceSearchLimit: normalizedSearchLimit ?? 10,
           confluenceAccessClientId: normalizedAccessClientId || null,
           confluenceAccessClientSecret: normalizedAccessClientSecret || null,
+          githubBaseUrl: normalizedGithubBaseUrl || null,
+          githubOrgTokens: normalizedGithubOrgTokens || null,
           aiBaseUrl: normalizedAiBaseUrl || null,
           aiMaxTokens: normalizedAiMaxTokens ?? null,
           sprintsToSync: normalizedSprintsToSync ?? 10,
