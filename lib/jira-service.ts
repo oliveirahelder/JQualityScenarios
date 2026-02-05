@@ -162,6 +162,7 @@ Focus on realistic QA manual testing steps. Use clear and concise action/verific
 Manual scenarios must be specific to this ticket (use domain terms, thresholds, and rules from the description/comments).
 Always return 4-8 manual scenarios (do not leave manual empty).
 Gherkin scenarios must be 1:1 with manual scenarios.
+Do not include attachments or screenshots (QA will add them later).
 Return ONLY valid JSON in this exact shape:
 {
   "manual": [
@@ -197,12 +198,13 @@ Please generate test scenarios for this ticket.`
     const resolvedMaxTokens =
       typeof aiConfig?.maxTokens === 'number' && Number.isFinite(aiConfig.maxTokens)
         ? aiConfig.maxTokens
-        : 1024
+        : undefined
     const content = await generateJsonWithOpenAI({
       system: systemPrompt,
       user: userContent,
       maxTokens: resolvedMaxTokens,
       temperature: 0.2,
+      strictJson: true,
       apiKey: aiConfig?.apiKey || undefined,
       model: aiConfig?.model || undefined,
       baseUrl: aiConfig?.baseUrl || undefined,
@@ -413,7 +415,65 @@ Please generate test scenarios for this ticket.`
       return parsed
     }
 
-    return { gherkin: [content], manual: [] }
+    const fallbackManualFromTable = (raw: string): ManualScenario[] => {
+      const tableStart = raw.indexOf('||ID||')
+      if (tableStart === -1) return []
+      const tableText = raw.slice(tableStart)
+      const rows = tableText
+        .split(/\r?\n/)
+        .map((row) => row.trim())
+        .filter((row) => row.startsWith('|') && row.endsWith('|') && !row.startsWith('||'))
+
+      if (rows.length === 0) return []
+
+      return rows
+        .map((row) => row.split('|').slice(1, -1))
+        .map((columns, index) => {
+          const [
+            id,
+            testScenario,
+            steps,
+            expectedResult,
+            actualResult,
+            notes,
+          ] = columns
+          const executionSteps =
+            typeof steps === 'string'
+              ? steps
+                  .split(/\r?\n+/)
+                  .map((step) => step.replace(/^\d+\.\s*/, '').trim())
+                  .filter(Boolean)
+              : []
+          return {
+            id: (id || '').trim() || `FT-${String(index + 1).padStart(2, '0')}`,
+            testScenario: (testScenario || '').trim() || `Scenario ${index + 1}`,
+            executionSteps,
+            expectedResult: (expectedResult || '').trim(),
+            actualResult: (actualResult || '').trim() || undefined,
+            notes: (notes || '').trim() || undefined,
+          }
+        })
+        .filter((scenario) => scenario.testScenario)
+    }
+
+    const fallbackGherkinFromText = (raw: string): string[] => {
+      const scenarioBlocks = raw
+        .split(/\n(?=Scenario:\s*)/i)
+        .map((block) => block.trim())
+        .filter((block) => block.toLowerCase().startsWith('scenario:'))
+      if (scenarioBlocks.length > 0) return scenarioBlocks
+      return raw.includes('Given') || raw.includes('When') || raw.includes('Then')
+        ? [raw.trim()]
+        : []
+    }
+
+    const manualFallback = fallbackManualFromTable(content)
+    const gherkinFallback = fallbackGherkinFromText(content)
+    if (manualFallback.length || gherkinFallback.length) {
+      return { gherkin: gherkinFallback, manual: manualFallback }
+    }
+
+    return { gherkin: [], manual: [] }
   } catch (error) {
     console.error('Error generating scenarios with AI:', error)
     const message =

@@ -94,6 +94,8 @@ export default function SettingsPage() {
   const [aiSaving, setAiSaving] = useState(false)
   const [aiModelsLoading, setAiModelsLoading] = useState(false)
   const [aiModels, setAiModels] = useState<string[]>([])
+  const [aiUseCustomModel, setAiUseCustomModel] = useState(false)
+  const aiPresetModels = ['gemini-2.5-pro', 'gpt-5.2', 'claude-sonnet-4.5']
   const [aiApiKey, setAiApiKey] = useState('')
   const [aiModel, setAiModel] = useState('')
   const [aiError, setAiError] = useState('')
@@ -118,7 +120,7 @@ export default function SettingsPage() {
   const [adminConfluenceAccessClientSecretSet, setAdminConfluenceAccessClientSecretSet] =
     useState(false)
   const [adminAiBaseUrl, setAdminAiBaseUrl] = useState('')
-  const [adminAiMaxTokens, setAdminAiMaxTokens] = useState('4096')
+  const [adminAiMaxTokens, setAdminAiMaxTokens] = useState('')
   const [adminSprintsToSync, setAdminSprintsToSync] = useState('10')
   const [adminSaving, setAdminSaving] = useState(false)
   const [adminError, setAdminError] = useState('')
@@ -246,7 +248,7 @@ export default function SettingsPage() {
         const nextAdminAiMaxTokens =
           typeof adminData?.aiMaxTokens === 'number'
             ? adminData.aiMaxTokens.toString()
-            : '4096'
+            : ''
         const nextAdminSprintsToSync =
           typeof adminData?.sprintsToSync === 'number'
             ? adminData.sprintsToSync.toString()
@@ -686,9 +688,12 @@ export default function SettingsPage() {
         ? parsedConfluenceSearchLimit
         : undefined
       const parsedAiMaxTokens = Number.parseInt(adminAiMaxTokens, 10)
-      const normalizedAiMaxTokens = Number.isFinite(parsedAiMaxTokens)
-        ? parsedAiMaxTokens
-        : undefined
+      const normalizedAiMaxTokens =
+        adminAiMaxTokens.trim() === ''
+          ? null
+          : Number.isFinite(parsedAiMaxTokens)
+            ? parsedAiMaxTokens
+            : undefined
       const normalizedAccessClientId = adminConfluenceAccessClientId.trim()
       const normalizedAccessClientSecret = adminConfluenceAccessClientSecret.trim()
       const authToken = localStorage.getItem('token')
@@ -1196,25 +1201,56 @@ export default function SettingsPage() {
                           className="bg-slate-800/50 border-slate-700"
                         />
 
-                        {aiModels.length > 0 ? (
+                        {aiModels.length > 0 && !aiGatewayEnabled ? (
                           <select
                             className="w-full rounded-md border border-slate-700 bg-slate-800/50 px-3 py-2 text-sm text-slate-200"
-                            value={aiModel}
-                            onChange={(e) => setAiModel(e.target.value)}
+                            value={aiUseCustomModel ? '__custom__' : aiModel}
+                            onChange={(e) => {
+                              const nextValue = e.target.value
+                              if (nextValue === '__custom__') {
+                                setAiUseCustomModel(true)
+                                return
+                              }
+                              setAiUseCustomModel(false)
+                              setAiModel(nextValue)
+                            }}
                           >
                             {aiModels.map((model) => (
                               <option key={model} value={model}>
                                 {model}
                               </option>
                             ))}
+                            <option value="__custom__">Custom model…</option>
                           </select>
-                        ) : (
-                          <Input
-                            placeholder="OpenAI model (e.g. gpt-4o-mini)"
-                            value={aiModel}
-                            onChange={(e) => setAiModel(e.target.value)}
-                            className="bg-slate-800/50 border-slate-700"
-                          />
+                        ) : null}
+
+                        {(aiModels.length === 0 || aiGatewayEnabled || aiUseCustomModel) && (
+                          <>
+                            <Input
+                              placeholder="AI model (e.g. gpt-5.2)"
+                              value={aiModel}
+                              onChange={(e) => setAiModel(e.target.value)}
+                              className="bg-slate-800/50 border-slate-700"
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              {aiPresetModels.map((model) => (
+                                <button
+                                  key={model}
+                                  type="button"
+                                  onClick={() => {
+                                    setAiModel(model)
+                                    setAiUseCustomModel(false)
+                                  }}
+                                  className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:border-blue-400 hover:text-white transition"
+                                >
+                                  {model}
+                                </button>
+                              ))}
+                            </div>
+                            <p className="text-[11px] text-slate-500">
+                              Preset models use no token limit when Admin AI Max Tokens is empty.
+                            </p>
+                          </>
                         )}
 
                         <Button
@@ -1369,15 +1405,15 @@ export default function SettingsPage() {
                   <div className="text-xs text-slate-400 mb-2">AI Max Tokens</div>
                   <Input
                     type="number"
-                    min={256}
+                    min={0}
                     max={16384}
-                    placeholder="4096"
+                    placeholder="Leave empty for no limit"
                     value={adminAiMaxTokens}
                     onChange={(e) => setAdminAiMaxTokens(e.target.value)}
                     className="bg-slate-800/50 border-slate-700"
                   />
                   <p className="text-[11px] text-slate-500">
-                    Used for scenario generation. Larger values may slow responses.
+                    Leave empty (or 0) to avoid limiting tokens. Larger values may slow responses.
                   </p>
                 </div>
                 <div>

@@ -8,6 +8,7 @@ type AiJsonRequest = {
   apiKey?: string
   model?: string
   baseUrl?: string | null
+  strictJson?: boolean
 }
 
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
@@ -42,14 +43,18 @@ export async function generateJsonWithOpenAI(request: AiJsonRequest) {
   const payload: Record<string, unknown> = {
     model,
     temperature: request.temperature ?? DEFAULT_TEMPERATURE,
-    response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: request.system },
       { role: 'user', content: request.user },
     ],
   }
 
-  payload.max_completion_tokens = request.maxTokens ?? DEFAULT_MAX_TOKENS
+  if (request.strictJson) {
+    payload.response_format = { type: 'json_object' }
+  }
+  if (typeof request.maxTokens === 'number' && Number.isFinite(request.maxTokens)) {
+    payload.max_completion_tokens = request.maxTokens
+  }
 
   const response = await client.chat.completions.create(payload)
 
@@ -117,7 +122,10 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
       { role: 'system', content: request.system },
       { role: 'user', content: request.user },
     ],
-    max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+  }
+  const payloadWithLimits: Record<string, unknown> = { ...basePayload }
+  if (typeof request.maxTokens === 'number' && Number.isFinite(request.maxTokens)) {
+    payloadWithLimits.max_tokens = request.maxTokens
   }
 
   const attemptRequest = async (payload: Record<string, unknown>) => {
@@ -154,8 +162,8 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
     return content
   }
 
-  const payloadWithReasoning = {
-    ...basePayload,
+  const payloadWithReasoning: Record<string, unknown> = {
+    ...payloadWithLimits,
     reasoning: { effort: 'none' },
   }
 
@@ -165,9 +173,11 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
     const message = error instanceof Error ? error.message : String(error)
     if (
       message.includes('unknown_parameter') ||
-      message.toLowerCase().includes('unknown parameter')
+      message.toLowerCase().includes('unknown parameter') ||
+      message.toLowerCase().includes('invalid request format') ||
+      message.toLowerCase().includes('reasoning')
     ) {
-      return await attemptRequest(basePayload)
+      return await attemptRequest(payloadWithLimits)
     }
     throw error
   }

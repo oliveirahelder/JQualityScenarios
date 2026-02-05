@@ -21,7 +21,7 @@ export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
       confluenceAccessClientIdSet: Boolean(settings?.confluenceAccessClientId),
       confluenceAccessClientSecretSet: Boolean(settings?.confluenceAccessClientSecret),
       aiBaseUrl: settings?.aiBaseUrl || '',
-      aiMaxTokens: settings?.aiMaxTokens ?? 4096,
+      aiMaxTokens: settings?.aiMaxTokens ?? null,
       sprintsToSync: settings?.sprintsToSync ?? 10,
     })
   } catch (error) {
@@ -118,7 +118,9 @@ export const PUT = withAuth(
         : undefined
     const normalizedAiMaxTokens =
       typeof aiMaxTokens === 'number' && Number.isFinite(aiMaxTokens)
-        ? Math.min(Math.max(Math.floor(aiMaxTokens), 256), 16384)
+        ? aiMaxTokens <= 0
+          ? null
+          : Math.min(Math.max(Math.floor(aiMaxTokens), 256), 16384)
         : undefined
     const normalizedSprintsToSync =
       typeof sprintsToSync === 'number' && Number.isFinite(sprintsToSync)
@@ -176,7 +178,7 @@ export const PUT = withAuth(
           confluenceAccessClientId: normalizedAccessClientId || null,
           confluenceAccessClientSecret: normalizedAccessClientSecret || null,
           aiBaseUrl: normalizedAiBaseUrl || null,
-          aiMaxTokens: normalizedAiMaxTokens ?? 4096,
+          aiMaxTokens: normalizedAiMaxTokens ?? null,
           sprintsToSync: normalizedSprintsToSync ?? 10,
         },
       })

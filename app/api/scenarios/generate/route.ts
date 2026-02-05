@@ -85,7 +85,10 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
       apiKey: user.openaiApiKey || undefined,
       model: user.openaiModel || undefined,
       baseUrl: adminSettings?.aiBaseUrl || null,
-      maxTokens: adminSettings?.aiMaxTokens ?? 4096,
+      maxTokens:
+        typeof adminSettings?.aiMaxTokens === 'number' && Number.isFinite(adminSettings.aiMaxTokens)
+          ? adminSettings.aiMaxTokens
+          : undefined,
     }
 
     const generated = await generateScenariosWithAI(jiraDetails, confluence, aiConfig)
