@@ -167,19 +167,25 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
     reasoning: { effort: 'none' },
   }
 
+  // Try once with reasoning, then always fall back to the minimal payload
   try {
     return await attemptRequest(payloadWithReasoning)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    if (
-      message.includes('unknown_parameter') ||
+    const shouldRetry =
+      message.toLowerCase().includes('unknown_parameter') ||
       message.toLowerCase().includes('unknown parameter') ||
       message.toLowerCase().includes('invalid request format') ||
-      message.toLowerCase().includes('reasoning')
-    ) {
-      return await attemptRequest(payloadWithLimits)
+      message.toLowerCase().includes('reasoning') ||
+      message.toLowerCase().includes('failed to make http request') ||
+      message.toLowerCase().includes('provider api') ||
+      message.toLowerCase().includes('400')
+
+    if (!shouldRetry) {
+      throw error
     }
-    throw error
+
+    return await attemptRequest(payloadWithLimits)
   }
 }
 
