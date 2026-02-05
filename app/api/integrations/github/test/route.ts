@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { withAuth } from '@/lib/middleware'
+import { resolveGithubApiUrl } from '@/lib/github-service'
 
 export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
@@ -18,7 +19,9 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
       return NextResponse.json({ error: 'GitHub token not configured' }, { status: 400 })
     }
 
-    const response = await fetch('https://api.github.com/user', {
+    const adminSettings = await prisma.adminSettings.findFirst()
+    const apiBaseUrl = resolveGithubApiUrl(adminSettings?.githubBaseUrl || null, null)
+    const response = await fetch(`${apiBaseUrl}/user`, {
       headers: {
         Authorization: `Bearer ${user.githubApiToken}`,
         Accept: 'application/vnd.github+json',

@@ -16,6 +16,13 @@ interface JiraDetails {
     url?: string | null
     title?: string | null
     notes?: string | null
+    author?: string | null
+    createdAt?: string | null
+    updatedAt?: string | null
+    additions?: number | null
+    deletions?: number | null
+    commits?: number | null
+    files?: string[]
   }>
   relatedTickets?: string[]
 }
@@ -189,6 +196,29 @@ Comments: ${ticketDetails.comments || 'None'}
 Attachments: ${
       ticketDetails.attachments && ticketDetails.attachments.length > 0
         ? ticketDetails.attachments.join(', ')
+        : 'None'
+    }
+Pull Requests: ${
+      ticketDetails.pullRequests && ticketDetails.pullRequests.length > 0
+        ? ticketDetails.pullRequests
+            .map((pr, index) => {
+              const lines = [
+                `PR ${index + 1}: ${pr.title || 'Untitled'}`,
+                pr.url ? `URL: ${pr.url}` : null,
+                pr.author ? `Author: ${pr.author}` : null,
+                pr.createdAt ? `Created: ${pr.createdAt}` : null,
+                pr.updatedAt ? `Updated: ${pr.updatedAt}` : null,
+                Number.isFinite(pr.commits ?? NaN) ? `Commits: ${pr.commits}` : null,
+                Number.isFinite(pr.additions ?? NaN) ? `Additions: ${pr.additions}` : null,
+                Number.isFinite(pr.deletions ?? NaN) ? `Deletions: ${pr.deletions}` : null,
+                pr.files && pr.files.length > 0 ? `Files: ${pr.files.join(', ')}` : null,
+                pr.notes ? `Notes: ${pr.notes}` : null,
+              ]
+                .filter(Boolean)
+                .join('\n')
+              return lines
+            })
+            .join('\n\n')
         : 'None'
     }
 ${confluenceContext ? `\nRelated Documentation:\n${confluenceContext}` : ''}
