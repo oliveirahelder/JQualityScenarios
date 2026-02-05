@@ -115,7 +115,8 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
   }
 
   const endpoint = normalizeGatewayEndpoint(request.baseUrl as string)
-  const basePayload = {
+  // Gateway payload: keep it minimal (model, temperature, messages, max_tokens).
+  const payloadBase: Record<string, unknown> = {
     model: request.model || DEFAULT_MODEL,
     temperature: request.temperature ?? DEFAULT_TEMPERATURE,
     messages: [
@@ -123,7 +124,8 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
       { role: 'user', content: request.user },
     ],
   }
-  const payloadWithLimits: Record<string, unknown> = { ...basePayload }
+
+  const payloadWithLimits: Record<string, unknown> = { ...payloadBase }
   if (
     typeof request.maxTokens === 'number' &&
     Number.isFinite(request.maxTokens) &&
@@ -166,21 +168,15 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
     return content
   }
 
-  const payloadWithReasoning: Record<string, unknown> = {
-    ...payloadWithLimits,
-    reasoning: { effort: 'none' },
-  }
-
-  // Try once with reasoning, then always fall back to the minimal payload
+  // Try once (plain). If falha por qualquer motivo, tenta sem max_tokens também.
   try {
-    return await attemptRequest(payloadWithReasoning)
+    return await attemptRequest(payloadWithLimits)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     const shouldRetry =
       message.toLowerCase().includes('unknown_parameter') ||
       message.toLowerCase().includes('unknown parameter') ||
       message.toLowerCase().includes('invalid request format') ||
-      message.toLowerCase().includes('reasoning') ||
       message.toLowerCase().includes('failed to make http request') ||
       message.toLowerCase().includes('provider api') ||
       message.toLowerCase().includes('400')
@@ -189,7 +185,8 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
       throw error
     }
 
-    return await attemptRequest(payloadWithLimits)
+    const payloadNoLimit = { ...payloadBase } // remove max_tokens entirely
+    return await attemptRequest(payloadNoLimit)
   }
 }
 
