@@ -81,12 +81,13 @@ export default function Navbar() {
     loadConnections()
   }, [])
 
-  const navLinks = [
-    { href: '/dashboard', label: 'Dashboard', icon: 'D' },
-    { href: '/sprints', label: 'Sprints', icon: 'S' },
-    { href: '/scenarios', label: 'Scenarios', icon: 'C' },
-    { href: '/documentation', label: 'Docs', icon: 'Docs' },
-  ]
+const navLinks = [
+  { href: '/dashboard', label: 'Dashboard', icon: 'D' },
+  { href: '/sprints', label: 'Sprints', icon: 'S' },
+  { href: '/scenarios', label: 'Scenarios', icon: 'C' },
+  { href: '/documentation', label: 'Docs', icon: 'Docs' },
+  { href: '/jira-tickets', label: 'Create Ticket', icon: 'T' },
+]
   const adminLinks = [
     { href: '/reports', label: 'Reports', icon: 'R' },
   ]

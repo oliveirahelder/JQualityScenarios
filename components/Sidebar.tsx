@@ -21,6 +21,7 @@ const navLinks: NavLink[] = [
   { href: '/sprints', label: 'Sprints' },
   { href: '/scenarios', label: 'Scenarios' },
   { href: '/documentation', label: 'Docs' },
+  { href: '/jira-tickets', label: 'Create Ticket' },
   { href: '/delivery-timings', label: 'Delivery individual timings' },
 ]
 

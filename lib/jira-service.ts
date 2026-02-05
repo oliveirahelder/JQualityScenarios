@@ -126,6 +126,97 @@ export async function fetchJiraTicket(
   }
 }
 
+export type JiraCreateIssueInput = {
+  projectKey: string
+  summary: string
+  description?: string
+  issueType?: string
+  labels?: string[]
+}
+
+const buildJiraDescription = (text: string, deployment: 'cloud' | 'datacenter') => {
+  if (deployment === 'cloud') {
+    return {
+      type: 'doc',
+      version: 1,
+      content: [
+        {
+          type: 'paragraph',
+          content: text
+            ? [
+                {
+                  type: 'text',
+                  text,
+                },
+              ]
+            : [],
+        },
+      ],
+    }
+  }
+  return text
+}
+
+export async function createJiraTicket(
+  input: JiraCreateIssueInput,
+  credentials?: JiraCredentials
+): Promise<{ key: string; url?: string }> {
+  const baseUrl = credentials?.baseUrl || process.env.JIRA_BASE_URL
+  const user = credentials?.user || process.env.JIRA_USER
+  const token = credentials?.token || process.env.JIRA_API_TOKEN
+  const authType = credentials?.authType || 'basic'
+  const deployment = credentials?.deployment || 'cloud'
+  const apiVersion = deployment === 'datacenter' ? '2' : '3'
+
+  if (!baseUrl || !token || (authType === 'basic' && !user)) {
+    throw new Error('Jira credentials not configured')
+  }
+
+  const description = buildJiraDescription(input.description || '', deployment)
+  const issueType = input.issueType?.trim() || 'Task'
+  const issueTypePayload =
+    /^\d+$/.test(issueType) ? { id: issueType } : { name: issueType }
+
+  try {
+    const response = await axios.post(
+      `${baseUrl}/rest/api/${apiVersion}/issue`,
+      {
+        fields: {
+          project: { key: input.projectKey },
+          summary: input.summary,
+          description,
+          issuetype: issueTypePayload,
+          labels: input.labels && input.labels.length > 0 ? input.labels : undefined,
+        },
+      },
+      {
+        auth:
+          authType === 'basic'
+            ? {
+                username: user as string,
+                password: token,
+              }
+            : undefined,
+        headers:
+          authType === 'oauth' || authType === 'bearer'
+            ? {
+                Authorization: `Bearer ${token}`,
+              }
+            : undefined,
+      }
+    )
+
+    const key = response.data?.key
+    return {
+      key,
+      url: key ? `${baseUrl.replace(/\/+$/, '')}/browse/${key}` : undefined,
+    }
+  } catch (error) {
+    console.error('Error creating Jira ticket:', error)
+    throw new Error('Failed to create Jira ticket')
+  }
+}
+
 export async function parseJiraXml(xmlText: string): Promise<JiraDetails[]> {
   try {
     const parsed = await parseStringPromise(xmlText)

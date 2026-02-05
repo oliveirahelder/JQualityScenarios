@@ -43,6 +43,8 @@ prisma/prisma/dev.db
 prisma/*.db
 prisma/*.db-journal
 prisma/prisma/
+prisma/*.bak
+*.bak
 
 # TypeScript build cache
 tsconfig.tsbuildinfo
