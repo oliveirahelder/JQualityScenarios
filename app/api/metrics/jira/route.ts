@@ -225,6 +225,8 @@ function buildSprintMetrics(sprint: SprintWithTickets, now: Date) {
     id: sprint.id,
     name: sprint.name,
     teamKey: getTeamKey(sprint.name),
+    startDate: sprint.startDate.toISOString(),
+    endDate: sprint.endDate.toISOString(),
     successPercent,
     daysLeft,
     devTickets,

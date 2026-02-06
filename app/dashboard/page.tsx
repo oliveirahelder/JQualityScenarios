@@ -85,6 +85,8 @@ export default function Dashboard() {
       id: string
       name: string
       teamKey: string
+      startDate: string
+      endDate: string
       successPercent: number
       daysLeft: number
       devTickets: number
@@ -111,6 +113,8 @@ export default function Dashboard() {
       id: string
       name: string
       teamKey: string
+      startDate: string
+      endDate: string
       successPercent: number
       daysLeft: number
       devTickets: number
@@ -529,11 +533,24 @@ export default function Dashboard() {
   const removedTickets = selectedSprint?.removedTickets ?? 0
   const scopeTickets = Math.max(0, plannedTickets + addedTickets - removedTickets)
   const plannedStoryPoints = selectedSprint?.storyPointsTotal ?? 0
+  const formatSprintDate = (value?: string | null) => {
+    if (!value) return '--'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return '--'
+    return new Intl.DateTimeFormat('pt-PT', {
+      timeZone: 'UTC',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(date)
+  }
+  const sprintStart = selectedSprint ? formatSprintDate(selectedSprint.startDate) : '--'
+  const sprintEnd = selectedSprint ? formatSprintDate(selectedSprint.endDate) : '--'
 
   const essentialsCards: MetricCard[] = [
     {
       title: 'Active Sprint',
-      value: metricsLoading ? '--' : metricValues.activeSprintCount ?? 0,
+      value: metricsLoading ? '--' : selectedSprint ? `${sprintStart} → ${sprintEnd}` : '--',
       subtitle: selectedSprint
         ? `${selectedSprint.teamKey} · ${selectedSprint.name}`
         : 'No active sprint',
@@ -546,6 +563,14 @@ export default function Dashboard() {
             {
               label: 'Success rate',
               value: `${selectedSprint.successPercent}%`,
+            },
+            {
+              label: 'Start date',
+              value: sprintStart,
+            },
+            {
+              label: 'End date',
+              value: sprintEnd,
             },
             {
               label: 'Days left',

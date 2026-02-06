@@ -293,6 +293,7 @@ export async function ensureSprintSnapshot(
   const plannedScopeTickets = totalsOverride?.plannedScopeTickets ?? totalTicketsValue
   const addedTickets = totalsOverride?.addedTickets ?? 0
   const removedTickets = totalsOverride?.removedTickets ?? 0
+  const scopeTickets = Math.max(0, plannedScopeTickets + addedTickets - removedTickets)
   const finishedTickets = totalsOverride?.finishedTickets ?? closedTickets
   const qaDoneTotal = totalsOverride?.qaDoneTickets ?? qaDoneTickets
   const totalsPayload = {
@@ -306,8 +307,8 @@ export async function ensureSprintSnapshot(
     storyPointsTotal: totalsOverride?.storyPointsTotal ?? storyPointsTotal,
     storyPointsClosed: totalsOverride?.storyPointsClosed ?? storyPointsClosed,
     bounceBackTickets,
-    successPercent: plannedTickets
-      ? Math.round((finishedTickets / plannedTickets) * 1000) / 10
+    successPercent: scopeTickets
+      ? Math.round((finishedTickets / scopeTickets) * 1000) / 10
       : 0,
     workedTickets: typeof workedTickets === 'number' ? workedTickets : undefined,
   }
