@@ -65,15 +65,25 @@ function generateSearchTerms(query: string): string[] {
   return terms.length > 0 ? terms : [query.toLowerCase()]
 }
 
+function escapeJql(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
 /**
  * Search historical Jira tickets using keyword search
  */
+type JiraSearchOptions = {
+  limit?: number
+}
+
 export async function searchJiraTickets(
   query: string,
-  credentials?: JiraCredentials
+  credentials?: JiraCredentials,
+  options?: JiraSearchOptions
 ): Promise<SearchResult[]> {
   try {
-    const searchTerms = generateSearchTerms(query)
+    const rawQuery = query.trim()
+    const searchTerms = generateSearchTerms(rawQuery)
 
     // Search Jira using API
     const baseUrl = credentials?.baseUrl || process.env.JIRA_BASE_URL
@@ -88,45 +98,97 @@ export async function searchJiraTickets(
     }
 
     const results: SearchResult[] = []
+    const safeQuery = escapeJql(rawQuery)
+    const totalLimit = Math.min(Math.max(options?.limit ?? 100, 1), 500)
+    const jql = `text ~ "${safeQuery}" AND status in ("Done","Closed")`
+    let startAt = 0
+    let total = 0
 
-    for (const term of searchTerms.slice(0, 3)) {
-      try {
-        const jiraResponse = await axios.get(
-          `${baseUrl}/rest/api/${apiVersion}/search`,
-          {
-            params: {
-              jql: `text ~ "${term}" AND type = "Bug,Story,Task"`,
-              maxResults: 5,
-              fields: 'key,summary,description,status',
-            },
-            auth:
-              authType === 'basic'
-                ? {
-                    username: user as string,
-                    password: token,
-                  }
-                : undefined,
-            headers:
-              authType === 'oauth' || authType === 'bearer'
-                ? {
-                    Authorization: `Bearer ${token}`,
-                  }
-                : undefined,
-          }
-        )
-
-        for (const issue of jiraResponse.data.issues || []) {
-          results.push({
-            id: issue.key,
-            title: issue.fields.summary,
-            type: 'jira_ticket',
-            url: `${baseUrl}/browse/${issue.key}`,
-            relevanceScore: calculateRelevance(issue.fields.summary, query),
-            summary: issue.fields.description || issue.fields.summary,
-          })
+    do {
+      const pageSize = Math.min(100, totalLimit - results.length)
+      if (pageSize <= 0) break
+      const jiraResponse = await axios.get(
+        `${baseUrl}/rest/api/${apiVersion}/search`,
+        {
+          params: {
+            jql,
+            maxResults: pageSize,
+            startAt,
+            fields: 'key,summary,description,status',
+          },
+          auth:
+            authType === 'basic'
+              ? {
+                  username: user as string,
+                  password: token,
+                }
+              : undefined,
+          headers:
+            authType === 'oauth' || authType === 'bearer'
+              ? {
+                  Authorization: `Bearer ${token}`,
+                }
+              : undefined,
         }
-      } catch (error) {
-        console.error(`Error searching Jira for term "${term}":`, error)
+      )
+
+      total = jiraResponse.data.total ?? 0
+      const issues = jiraResponse.data.issues || []
+      for (const issue of issues) {
+        results.push({
+          id: issue.key,
+          title: issue.fields.summary,
+          type: 'jira_ticket',
+          url: `${baseUrl}/browse/${issue.key}`,
+          relevanceScore: calculateRelevance(issue.fields.summary, rawQuery),
+          summary: issue.fields.description || issue.fields.summary,
+        })
+      }
+      startAt += issues.length
+      if (issues.length === 0) break
+    } while (startAt < total && results.length < totalLimit)
+
+    if (results.length === 0 && searchTerms.length > 1) {
+      for (const term of searchTerms.slice(0, 3)) {
+        try {
+          const safeTerm = escapeJql(term)
+          const jiraResponse = await axios.get(
+            `${baseUrl}/rest/api/${apiVersion}/search`,
+            {
+              params: {
+                jql: `text ~ "${safeTerm}" AND status in ("Done","Closed")`,
+                maxResults: 10,
+                fields: 'key,summary,description,status',
+              },
+              auth:
+                authType === 'basic'
+                  ? {
+                      username: user as string,
+                      password: token,
+                    }
+                  : undefined,
+              headers:
+                authType === 'oauth' || authType === 'bearer'
+                  ? {
+                      Authorization: `Bearer ${token}`,
+                    }
+                  : undefined,
+            }
+          )
+
+          for (const issue of jiraResponse.data.issues || []) {
+            results.push({
+              id: issue.key,
+              title: issue.fields.summary,
+              type: 'jira_ticket',
+              url: `${baseUrl}/browse/${issue.key}`,
+              relevanceScore: calculateRelevance(issue.fields.summary, rawQuery),
+              summary: issue.fields.description || issue.fields.summary,
+            })
+          }
+        } catch (error) {
+          console.error(`Error searching Jira for term "${term}":`, error)
+        }
       }
     }
 

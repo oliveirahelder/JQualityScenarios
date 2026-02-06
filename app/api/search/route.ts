@@ -35,6 +35,10 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
     const query = searchParams.get('q')
     const type = searchParams.get('type') || 'all' // 'jira', 'confluence', 'all'
     const includeCache = searchParams.get('cache') !== 'false'
+    const jiraLimitParam = searchParams.get('jiraLimit') || searchParams.get('limit')
+    const confluenceLimitParam = searchParams.get('confluenceLimit') || searchParams.get('limit')
+    const jiraLimit = jiraLimitParam ? Number(jiraLimitParam) : null
+    const confluenceLimit = confluenceLimitParam ? Number(confluenceLimitParam) : null
     const cacheKey = `${type}:${query ?? ''}`
 
     const adminSettings = await prisma.adminSettings.findFirst()
@@ -69,7 +73,9 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
       spaceKeys: hasSpacesParam ? spaceKeys : [],
       parentPageId: confluencePublishParentId,
       baseCql: adminSettings?.confluenceSearchCql || null,
-      limit: adminSettings?.confluenceSearchLimit ?? null,
+      limit: Number.isFinite(confluenceLimit as number)
+        ? (confluenceLimit as number)
+        : adminSettings?.confluenceSearchLimit ?? null,
     }
 
     if (!query || query.trim().length === 0) {
@@ -110,7 +116,9 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
 
     const jiraPromise =
       type === 'all' || type === 'jira'
-        ? searchJiraTickets(query, jiraCredentials || undefined)
+        ? searchJiraTickets(query, jiraCredentials || undefined, {
+            limit: Number.isFinite(jiraLimit as number) ? (jiraLimit as number) : undefined,
+          })
         : Promise.resolve([])
     if ((type === 'all' || type === 'confluence') && !confluenceCredentials) {
       return NextResponse.json(

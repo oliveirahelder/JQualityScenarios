@@ -72,6 +72,7 @@ export default function DocumentationPage() {
   const [selectedSpaces, setSelectedSpaces] = useState<string[]>([])
   const [spacesLoading, setSpacesLoading] = useState(false)
   const [spacesError, setSpacesError] = useState('')
+  const [historyLimit, setHistoryLimit] = useState(50)
   const [historyResults, setHistoryResults] = useState<{
     jira: SearchResult[]
     confluence: SearchResult[]
@@ -247,7 +248,7 @@ export default function DocumentationPage() {
     }
   }
 
-  const handleHistorySearch = async () => {
+  const handleHistorySearch = async (overrideLimit?: number) => {
     if (!historyQuery.trim()) return
     setHistoryLoading(true)
     setHistoryError('')
@@ -255,13 +256,15 @@ export default function DocumentationPage() {
       if (historyType !== 'jira' && selectedSpaces.length === 0 && availableSpaces.length > 0) {
         throw new Error('Select at least one Confluence space to search.')
       }
+      const effectiveLimit = overrideLimit ?? historyLimit
       const token = localStorage.getItem('token')
       const spacesQuery =
         selectedSpaces.length > 0
           ? `&spaces=${encodeURIComponent(selectedSpaces.join(','))}`
           : ''
+      const limitQuery = effectiveLimit ? `&jiraLimit=${effectiveLimit}&limit=${effectiveLimit}` : ''
       const response = await fetch(
-        `/api/search?q=${encodeURIComponent(historyQuery)}&type=${historyType}&cache=false${spacesQuery}`,
+        `/api/search?q=${encodeURIComponent(historyQuery)}&type=${historyType}&cache=false${spacesQuery}${limitQuery}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -362,6 +365,28 @@ export default function DocumentationPage() {
                   className="pl-10 bg-slate-800/50 border-slate-700"
                 />
               </div>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                <span>Results limit</span>
+                <select
+                  value={historyLimit}
+                  onChange={(e) => setHistoryLimit(Number(e.target.value))}
+                  className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+                >
+                  {[25, 50, 100, 200, 300, 500].map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="text-xs text-blue-300 hover:text-blue-200 disabled:text-slate-500"
+                  onClick={() => handleHistorySearch(500)}
+                  disabled={historyLoading || !historyQuery.trim()}
+                >
+                  Show all (up to 500)
+                </button>
+              </div>
               {historyError ? (
                 <div className="text-xs text-red-300 bg-red-500/10 border border-red-500/40 rounded-md px-3 py-2">
                   {historyError}
@@ -417,6 +442,9 @@ export default function DocumentationPage() {
                     <Layers className="w-4 h-4 text-blue-400" />
                     Jira Tickets
                   </div>
+                  <p className="text-[11px] text-slate-500 mb-3">
+                    Showing {historyResults.jira.length} results (limit {historyLimit})
+                  </p>
                   {historyResults.jira.length === 0 ? (
                     <p className="text-xs text-slate-500">No Jira matches yet.</p>
                   ) : (
@@ -443,6 +471,9 @@ export default function DocumentationPage() {
                   </div>
                   <p className="text-[11px] text-slate-500 mb-3">
                     Content excerpts are pulled from matching pages.
+                  </p>
+                  <p className="text-[11px] text-slate-500 mb-3">
+                    Showing {historyResults.confluence.length} results (limit {Math.min(historyLimit, 50)})
                   </p>
                   {historyConfluenceError ? (
                     <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/40 rounded-md px-3 py-2 mb-3">
