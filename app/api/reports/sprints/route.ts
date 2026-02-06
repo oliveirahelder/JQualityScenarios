@@ -60,6 +60,7 @@ export const GET = withAuth(
           endDate: snapshot.endDate,
           status: snapshot.status,
           totals: safeParse(snapshot.totals) || {},
+          tickets: safeParse(snapshot.tickets) || [],
           assignees: safeParse(snapshot.assignees) || [],
           deliveryTimes: safeParse(snapshot.deliveryTimes) || [],
           ticketTimes: safeParse(snapshot.ticketTimes) || [],
