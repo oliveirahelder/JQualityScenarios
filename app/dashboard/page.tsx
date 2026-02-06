@@ -50,6 +50,7 @@ type MetricCard = {
   filter?: React.ReactNode
   columns?: string[]
   rows?: MetricRow[]
+  tooltip?: string
   loading?: boolean
   size?: 'hero' | 'standard' | 'compact'
 }
@@ -77,6 +78,7 @@ export default function Dashboard() {
     >
   >({})
   const [metricValues, setMetricValues] = useState({
+    jiraBaseUrl: null as string | null,
     lastSyncAt: null as string | null,
     activeSprintCount: null as number | null,
     activeSprints: [] as Array<{
@@ -95,7 +97,15 @@ export default function Dashboard() {
       totalTickets: number
       closedTickets: number
       finalPhaseTickets: number
-      assignees: Array<{ name: string; total: number; closed: number }>
+      assignees: Array<{
+        name: string
+        total: number
+        closed: number
+        ticketsTotal: number
+        ticketsClosed: number
+        finalPhaseTickets: number
+        finalPhaseStoryPoints: number
+      }>
     }>,
     syncedSprints: [] as Array<{
       id: string
@@ -113,7 +123,15 @@ export default function Dashboard() {
       totalTickets: number
       closedTickets: number
       finalPhaseTickets: number
-      assignees: Array<{ name: string; total: number; closed: number }>
+      assignees: Array<{
+        name: string
+        total: number
+        closed: number
+        ticketsTotal: number
+        ticketsClosed: number
+        finalPhaseTickets: number
+        finalPhaseStoryPoints: number
+      }>
     }>,
     riskSignals: [] as Array<{
       sprintId: string
@@ -131,8 +149,8 @@ export default function Dashboard() {
       totalOpen: 0,
       totalCreated: 0,
       totalClosed: 0,
-      averageOpenAgeDays: 0,
-      oldestOpenAgeDays: 0,
+      averageClosedAgeDays: 0,
+      oldestClosedAgeDays: 0,
       bySprint: [] as Array<{
         sprintId: string
         sprintName: string
@@ -140,8 +158,8 @@ export default function Dashboard() {
         created: number
         closed: number
         open: number
-        averageOpenAgeDays: number
-        oldestOpenAgeDays: number
+        averageClosedAgeDays: number
+        oldestClosedAgeDays: number
       }>,
     },
     assignees: [] as Array<{
@@ -153,6 +171,58 @@ export default function Dashboard() {
     }>,
     deliveryTimes: [] as Array<unknown>,
     deliveryTimesBySprint: [] as Array<unknown>,
+    storyPoints: {
+      currentTotal: null as number | null,
+      previousTotal: null as number | null,
+      delta: null as number | null,
+    },
+    finishedComparisonByTeam: [] as Array<{
+      teamKey: string
+      activeSprintId: string
+      activeSprintName: string
+      activeClosedTickets: number
+      activeStoryPointsClosed: number
+      previousSprintId: string | null
+      previousSprintName: string | null
+      previousTeamSize: number
+      previousTotalTickets: number
+      previousStoryPointsTotal: number
+      previousClosedTickets: number
+      previousStoryPointsClosed: number
+      periodDays: number
+    }>,
+    storyPointsByTeam: [] as Array<{
+      teamKey: string
+      activeSprintId: string
+      activeSprintName: string
+      activeStoryPointsTotal: number
+      activeStoryPointsClosed: number
+      previousSprintId: string | null
+      previousSprintName: string | null
+      previousStoryPointsTotal: number
+      previousStoryPointsClosed: number
+      averageStoryPointsTotal: number
+      averageStoryPointsClosed: number
+      averageSprintCount: number
+    }>,
+    storyPointAverages: [] as Array<{
+      name: string
+      avgStoryPointsAllocated: number
+      avgStoryPointsClosed: number
+      sprintCount: number
+    }>,
+    contributorRankingsByTeam: [] as Array<{
+      teamKey: string
+      rankings: Array<{
+        name: string
+        closedStoryPoints: number
+        closedTickets: number
+        totalStoryPoints: number
+        totalTickets: number
+        averageClosedStoryPoints: number
+        sprintCount: number
+      }>
+    }>,
   })
   const loadMetrics = useCallback(async () => {
     setMetricsLoading(true)
@@ -169,6 +239,7 @@ export default function Dashboard() {
       }
       const data = await response.json()
       setMetricValues({
+        jiraBaseUrl: data.jiraBaseUrl ?? null,
         lastSyncAt: data.lastSyncAt ?? null,
         activeSprintCount: data.activeSprintCount ?? null,
         activeSprints: data.activeSprints || [],
@@ -178,13 +249,22 @@ export default function Dashboard() {
           totalOpen: 0,
           totalCreated: 0,
           totalClosed: 0,
-          averageOpenAgeDays: 0,
-          oldestOpenAgeDays: 0,
+          averageClosedAgeDays: 0,
+          oldestClosedAgeDays: 0,
           bySprint: [],
         },
         assignees: data.assignees || [],
         deliveryTimes: data.deliveryTimes || [],
         deliveryTimesBySprint: data.deliveryTimesBySprint || [],
+        storyPoints: data.storyPoints || {
+          currentTotal: null,
+          previousTotal: null,
+          delta: null,
+        },
+        finishedComparisonByTeam: data.finishedComparisonByTeam || [],
+        storyPointsByTeam: data.storyPointsByTeam || [],
+        storyPointAverages: data.storyPointAverages || [],
+        contributorRankingsByTeam: data.contributorRankingsByTeam || [],
       })
     } catch {
       // Keep defaults on error
@@ -334,6 +414,50 @@ export default function Dashboard() {
     filteredSyncedSprints[0] ||
     null
 
+  const selectedComparison = selectedSprint
+    ? metricValues.finishedComparisonByTeam.find(
+        (entry) => entry.activeSprintId === selectedSprint.id
+      )
+    : null
+
+  const selectedStoryPointsTeam = selectedSprint
+    ? metricValues.storyPointsByTeam.find(
+        (entry) => entry.activeSprintId === selectedSprint.id
+      )
+    : null
+
+  const storyPointAveragesByName = new Map(
+    metricValues.storyPointAverages.map((entry) => [entry.name, entry])
+  )
+  const teamRankingEntry = metricValues.contributorRankingsByTeam.find(
+    (entry) => entry.teamKey === (selectedTeamKey || selectedSprint?.teamKey)
+  )
+  const teamRankings = teamRankingEntry?.rankings || []
+  const selectedAssignees = selectedSprint?.assignees ?? []
+  const contributorCandidates = selectedAssignees.filter(
+    (assignee) => assignee.ticketsTotal > 0
+  )
+  const sortedByContribution = [...contributorCandidates].sort(
+    (a, b) =>
+      b.finalPhaseStoryPoints - a.finalPhaseStoryPoints ||
+      b.finalPhaseTickets - a.finalPhaseTickets ||
+      a.name.localeCompare(b.name)
+  )
+  const sortedByLowestContribution = [...contributorCandidates].sort(
+    (a, b) =>
+      a.finalPhaseStoryPoints - b.finalPhaseStoryPoints ||
+      a.finalPhaseTickets - b.finalPhaseTickets ||
+      a.name.localeCompare(b.name)
+  )
+  const topContributor = sortedByContribution[0] || null
+  const lowestContributor = sortedByLowestContribution[0] || null
+  const topContributorAvg = topContributor
+    ? storyPointAveragesByName.get(topContributor.name)
+    : null
+  const lowestContributorAvg = lowestContributor
+    ? storyPointAveragesByName.get(lowestContributor.name)
+    : null
+
   const totalTickets = filteredActiveSprints.reduce(
     (sum, sprint) => sum + sprint.totalTickets,
     0
@@ -356,6 +480,9 @@ export default function Dashboard() {
   const riskSignalsFiltered = metricValues.riskSignals.filter(
     (signal) => !selectedTeamKey || signal.teamKey === selectedTeamKey
   )
+  const jiraTicketBaseUrl = metricValues.jiraBaseUrl
+    ? metricValues.jiraBaseUrl.replace(/\/$/, '')
+    : ''
   const riskSignalsScoped = selectedSprint
     ? riskSignalsFiltered.filter((signal) => signal.sprintId === selectedSprint.id)
     : riskSignalsFiltered
@@ -367,21 +494,25 @@ export default function Dashboard() {
     if (selectedSprint?.id && entry.sprintId !== selectedSprint.id) return false
     return true
   })
+  const openBugsTeamScoped = metricValues.openBugs.bySprint.filter((entry) => {
+    if (selectedTeamKey && entry.teamKey !== selectedTeamKey) return false
+    return true
+  })
   const openBugCreated = openBugsScoped.reduce((sum, entry) => sum + entry.created, 0)
   const openBugClosed = openBugsScoped.reduce((sum, entry) => sum + entry.closed, 0)
-  const openBugTotal = openBugsScoped.reduce((sum, entry) => sum + entry.open, 0)
-  const openBugAverageAge = openBugTotal
+  const openBugTotal = openBugsTeamScoped.reduce((sum, entry) => sum + entry.open, 0)
+  const openBugAverageClose = openBugClosed
     ? Math.round(
         (openBugsScoped.reduce(
-          (sum, entry) => sum + entry.averageOpenAgeDays * entry.open,
+          (sum, entry) => sum + entry.averageClosedAgeDays * entry.closed,
           0
         ) /
-          openBugTotal) *
+          openBugClosed) *
           10
       ) / 10
     : 0
-  const openBugOldest = openBugsScoped.reduce(
-    (max, entry) => Math.max(max, entry.oldestOpenAgeDays),
+  const openBugOldestClose = openBugsScoped.reduce(
+    (max, entry) => Math.max(max, entry.oldestClosedAgeDays),
     0
   )
 
@@ -390,6 +521,151 @@ export default function Dashboard() {
     ? selectedDocStats.draft + selectedDocStats.underReview
     : 0
 
+  const closedTickets = selectedComparison?.activeClosedTickets ?? selectedSprint?.doneTickets ?? 0
+  const closedStoryPoints =
+    selectedComparison?.activeStoryPointsClosed ?? selectedSprint?.storyPointsCompleted ?? 0
+  const plannedTickets = selectedSprint?.totalTickets ?? 0
+  const plannedStoryPoints = selectedSprint?.storyPointsTotal ?? 0
+
+  const essentialsCards: MetricCard[] = [
+    {
+      title: 'Active Sprint',
+      value: metricsLoading ? '--' : metricValues.activeSprintCount ?? 0,
+      subtitle: selectedSprint
+        ? `${selectedSprint.teamKey} · ${selectedSprint.name}`
+        : 'No active sprint',
+      tooltip:
+        'Active sprint summary. Success rate = closed/done vs planned. Final phase = Awaiting Approval/Ready for Release/In Release/Done/Closed. Contributors are based on final-phase tickets.',
+      icon: BarChart3,
+      color: 'from-blue-600 to-blue-500',
+      rows: selectedSprint
+        ? [
+            {
+              label: 'Success rate',
+              value: `${selectedSprint.successPercent}%`,
+            },
+            {
+              label: 'Days left',
+              value: {
+                value: `${selectedSprint.daysLeft}d`,
+                className: selectedSprint.daysLeft < 0 ? 'text-red-300' : 'text-slate-100',
+              },
+            },
+            {
+              label: 'Planned tickets',
+              value: `${plannedTickets}`,
+            },
+            {
+              label: 'Final phase tickets',
+              value: `${selectedSprint.finalPhaseTickets}`,
+            },
+            {
+              label: 'Top contributor',
+              labelTitle: 'Most final-phase story points closed',
+              value: topContributor
+                ? `${topContributor.name} · ${topContributor.finalPhaseStoryPoints} SP · ${topContributor.finalPhaseTickets} tickets`
+                : 'N/A',
+            },
+            {
+              label: topContributorAvg
+                ? `Top avg (last ${topContributorAvg.sprintCount})`
+                : 'Top avg (last 10)',
+              value: topContributorAvg
+                ? `${topContributorAvg.avgStoryPointsClosed} SP / sprint`
+                : '0 SP / sprint',
+            },
+            {
+              label: 'Lowest contributor',
+              labelTitle: 'Lowest final-phase story points closed',
+              value: lowestContributor
+                ? `${lowestContributor.name} · ${lowestContributor.finalPhaseStoryPoints} SP · ${lowestContributor.finalPhaseTickets} tickets`
+                : 'N/A',
+            },
+            {
+              label: lowestContributorAvg
+                ? `Lowest avg (last ${lowestContributorAvg.sprintCount})`
+                : 'Lowest avg (last 10)',
+              value: lowestContributorAvg
+                ? `${lowestContributorAvg.avgStoryPointsClosed} SP / sprint`
+                : '0 SP / sprint',
+            },
+          ]
+        : [],
+    },
+    {
+      title: 'Tickets In Development',
+      value: metricsLoading ? '--' : selectedSprint?.devTickets ?? 0,
+      subtitle: selectedSprint ? `${selectedSprint.qaTickets} in QA` : 'No active sprint',
+      tooltip:
+        'Tickets currently in development (In Progress/Development/Refinement) and in QA for the selected sprint.',
+      icon: GitBranch,
+      color: 'from-purple-600 to-purple-500',
+      rows: selectedSprint
+        ? [
+            {
+              label: 'In progress',
+              value: `${selectedSprint.devTickets}`,
+              href: `/sprints?sprintId=${selectedSprint.id}&filter=active&devOnly=1`,
+            },
+            {
+              label: 'In QA',
+              value: `${selectedSprint.qaTickets}`,
+              href: `/sprints?sprintId=${selectedSprint.id}&filter=active&qaOnly=1`,
+            },
+          ]
+        : [],
+    },
+    {
+      title: 'Story Points',
+      value: metricsLoading
+        ? '--'
+        : `${selectedStoryPointsTeam?.averageStoryPointsClosed ?? 0}`,
+      subtitle: selectedStoryPointsTeam
+        ? `Avg closed (last ${selectedStoryPointsTeam.averageSprintCount} sprints)`
+        : 'Avg closed (last 10 sprints)',
+      tooltip:
+        'Average closed story points per sprint (last N), plus current sprint closed vs total story points.',
+      icon: Zap,
+      color: 'from-amber-600 to-amber-500',
+      rows: selectedSprint
+        ? ([
+            {
+              label: 'Current sprint',
+              value: `${closedStoryPoints} / ${plannedStoryPoints}`,
+            },
+            selectedStoryPointsTeam
+              ? {
+                  label: 'Avg committed',
+                  value: `${selectedStoryPointsTeam.averageStoryPointsTotal}`,
+                }
+              : null,
+          ].filter(Boolean) as MetricRow[])
+        : [],
+    },
+    {
+      title: 'Closed + Story Points',
+      value: metricsLoading ? '--' : `${closedTickets} / ${plannedTickets}`,
+      subtitle: 'Closed vs planned (current sprint)',
+      tooltip:
+        'Closed tickets vs planned in the current sprint, with story points closed vs total. Includes previous sprint comparison when available.',
+      icon: CheckCircle2,
+      color: 'from-emerald-600 to-emerald-500',
+      rows: ([
+        {
+          label: 'Story points closed',
+          value: `${closedStoryPoints} / ${plannedStoryPoints}`,
+        },
+        selectedComparison?.previousSprintId
+          ? {
+              label: `Previous sprint (${selectedComparison.periodDays}d)`,
+              value: `${selectedComparison.previousClosedTickets} / ${selectedComparison.previousTotalTickets}`,
+              href: `/sprints?sprintId=${selectedComparison.previousSprintId}&filter=completed&closedOnly=1`,
+            }
+          : null,
+      ].filter(Boolean) as MetricRow[]),
+    },
+  ]
+
   const heroMetrics: MetricCard[] = [
     {
       title: 'Release Readiness',
@@ -397,6 +673,8 @@ export default function Dashboard() {
       subtitle: selectedSprint
         ? `${selectedSprint.finalPhaseTickets}/${selectedSprint.totalTickets} in final phase`
         : 'No active sprint',
+      tooltip:
+        'Percent of tickets in final phase (Awaiting Approval/Ready for Release/In Release/Done/Closed) vs total tickets.',
       icon: CheckCircle2,
       color: 'from-green-600 to-green-500',
       trend: selectedSprint ? `${selectedSprint.daysLeft}d left` : '',
@@ -408,6 +686,7 @@ export default function Dashboard() {
       subtitle: selectedSprint
         ? `${selectedSprint.storyPointsCompleted}/${selectedSprint.storyPointsTotal} SP closed`
         : 'No active sprint',
+      tooltip: 'Story points closed vs total story points for the selected sprint.',
       icon: BarChart3,
       color: 'from-blue-600 to-blue-500',
       trend: selectedSprint
@@ -421,6 +700,7 @@ export default function Dashboard() {
       subtitle: metricsLoading
         ? 'Loading risk signals'
         : `${riskCount} signals · carryover, final phase, bounce, past due`,
+      tooltip: 'Risk signals from carryover, final phase open, bounce backs, and past due tickets.',
       icon: Zap,
       color: 'from-rose-600 to-rose-500',
       size: 'hero',
@@ -430,7 +710,27 @@ export default function Dashboard() {
       value: metricsLoading ? '--' : openBugTotal,
       subtitle: metricsLoading
         ? 'Loading bug aging'
-        : `Created ${openBugCreated} / Closed ${openBugClosed} / ${openBugAverageAge}d avg`,
+        : `Opened ${openBugCreated} / Closed ${openBugClosed} / ${openBugAverageClose}d avg close`,
+      rows: [
+        {
+          label: 'Opened this sprint',
+          value: `${openBugCreated}`,
+        },
+        {
+          label: 'Closed this sprint',
+          value: `${openBugClosed}`,
+        },
+        {
+          label: 'Still open',
+          value: `${openBugTotal}`,
+        },
+        {
+          label: 'Avg close time',
+          value: `${openBugAverageClose}d`,
+        },
+      ],
+      tooltip:
+        'Bugs created in the selected sprint: opened, closed, still open (not in Done/Closed), plus average time from creation to close (closed bugs only).',
       icon: Bug,
       color: 'from-red-600 to-red-500',
       size: 'hero',
@@ -443,6 +743,7 @@ export default function Dashboard() {
         title: 'Top Blockers',
         value: metricsLoading ? '--' : riskCount,
         subtitle: 'Active risk signals',
+        tooltip: 'Count of active risk signals for the selected sprint/team.',
         icon: Zap,
         color: 'from-rose-600 to-rose-500',
         size: 'compact',
@@ -453,6 +754,7 @@ export default function Dashboard() {
         subtitle: selectedSprint
           ? `${selectedSprint.finalPhaseTickets}/${selectedSprint.totalTickets} final phase`
           : 'No active sprint',
+        tooltip: 'Final phase tickets divided by planned tickets.',
         icon: CheckCircle2,
         color: 'from-emerald-600 to-emerald-500',
         size: 'compact',
@@ -465,6 +767,7 @@ export default function Dashboard() {
         subtitle: selectedSprint
           ? `${selectedSprint.bounceBackTickets} returns`
           : 'Carryover, final phase, bounce back, past due',
+        tooltip: 'Bounce back rate: tickets that returned from QA to development.',
         icon: BookOpen,
         color: 'from-amber-600 to-amber-500',
         size: 'compact',
@@ -475,6 +778,7 @@ export default function Dashboard() {
         title: 'In QA',
         value: metricsLoading ? '--' : selectedSprint?.qaTickets ?? 0,
         subtitle: selectedSprint ? `Sprint ${selectedSprint.name}` : 'No active sprint',
+        tooltip: 'Tickets currently in QA status for the selected sprint.',
         icon: Bug,
         color: 'from-purple-600 to-purple-500',
         size: 'compact',
@@ -484,7 +788,8 @@ export default function Dashboard() {
         value: metricsLoading ? '--' : openBugTotal,
         subtitle: metricsLoading
           ? 'Loading bug aging'
-          : `Created ${openBugCreated} / Closed ${openBugClosed} / ${openBugAverageAge}d avg`,
+          : `Opened ${openBugCreated} / Closed ${openBugClosed} / ${openBugAverageClose}d avg close`,
+        tooltip: 'Open bug count, created vs closed, and average close time.',
         icon: Bug,
         color: 'from-red-600 to-red-500',
         size: 'compact',
@@ -497,6 +802,7 @@ export default function Dashboard() {
           : selectedDocStats
           ? `${selectedDocStats.draft} draft · ${selectedDocStats.underReview} review`
           : 'No doc data',
+        tooltip: 'Documentation drafts + under review for the selected sprint.',
         icon: BookOpen,
         color: 'from-orange-600 to-orange-500',
         loading: docsLoading,
@@ -510,6 +816,7 @@ export default function Dashboard() {
         subtitle: selectedSprint
           ? `${selectedSprint.finalPhaseTickets}/${selectedSprint.totalTickets} final phase`
           : 'No active sprint',
+        tooltip: 'Percent of tickets that reached final phase in the selected sprint.',
         icon: CheckCircle2,
         color: 'from-emerald-600 to-emerald-500',
         size: 'compact',
@@ -520,6 +827,7 @@ export default function Dashboard() {
         subtitle: selectedSprint
           ? `Planned tickets in ${selectedSprint.name}`
           : 'No active sprint',
+        tooltip: 'Total planned tickets in the selected sprint.',
         icon: GitBranch,
         color: 'from-purple-600 to-purple-500',
         trend: selectedSprint ? `${selectedSprint.doneTickets} finished` : '',
@@ -533,6 +841,7 @@ export default function Dashboard() {
           : selectedDocStats
           ? `${selectedDocStats.underReview} in review`
           : 'No doc data',
+        tooltip: 'Draft release notes for the selected sprint.',
         icon: BookOpen,
         color: 'from-slate-600 to-slate-500',
         loading: docsLoading,
@@ -548,6 +857,8 @@ export default function Dashboard() {
       selectedSprint
         ? `${selectedSprint.name} · ${riskLevelLabel} risk`
         : 'Carryover, final phase, bounce back, past due',
+    tooltip:
+      'Tickets with carryover, final phase open, bounce backs, or past due dates. Table shows reasons per ticket.',
     icon: Zap,
     color: 'from-rose-600 to-rose-500',
     columns: ['Ticket', 'Status', 'Signals'],
@@ -556,7 +867,9 @@ export default function Dashboard() {
       columns: [
         {
           value: `${signal.jiraId}`,
-          href: `/sprints?sprintId=${signal.sprintId}&filter=active`,
+          href: jiraTicketBaseUrl && signal.jiraId
+            ? `${jiraTicketBaseUrl}/browse/${signal.jiraId}`
+            : undefined,
         },
         signal.status,
         `${signal.reasons.join(' · ')}`,
@@ -568,6 +881,8 @@ export default function Dashboard() {
     title: `Delivery Commitment - ${sprint.name}`,
     value: metricsLoading ? '--' : `${sprint.storyPointsCompleted} / ${sprint.storyPointsTotal}`,
     subtitle: 'Allocated vs delivered',
+    tooltip:
+      'Assignee allocation vs delivered story points for each active sprint.',
     icon: Zap,
     color: index % 2 === 0 ? 'from-amber-600 to-amber-500' : 'from-amber-500 to-orange-500',
     trend: metricsLoading ? '...' : '',
@@ -591,6 +906,7 @@ export default function Dashboard() {
     title: 'Assignees Workload',
     value: metricsLoading ? '--' : metricValues.assignees.length,
     subtitle: 'All active sprints',
+    tooltip: 'Workload per assignee across active sprints.',
     icon: User,
     color: 'from-slate-600 to-slate-500',
     trend: metricsLoading ? '...' : '',
@@ -619,6 +935,28 @@ export default function Dashboard() {
     })),
   }
 
+  const contributorRankMetric: MetricCard = {
+    title: 'Contributor Rank (All Synced Sprints)',
+    value: metricsLoading ? '--' : teamRankings.length,
+    subtitle: selectedTeamKey ? `Team ${selectedTeamKey}` : 'No team selected',
+    tooltip:
+      'Ranked by total closed story points across all synced sprints (tickets closed as tie-breaker).',
+    icon: User,
+    color: 'from-indigo-600 to-indigo-500',
+    trend: metricsLoading ? '...' : '',
+    columns: ['Rank', 'Contributor', 'SP Closed', 'Tickets Closed', 'Avg SP / Sprint'],
+    rows: teamRankings.map((entry, index) => ({
+      label: entry.name,
+      columns: [
+        `${index + 1}`,
+        entry.name,
+        `${entry.closedStoryPoints}`,
+        `${entry.closedTickets}`,
+        `${entry.averageClosedStoryPoints} (${entry.sprintCount})`,
+      ],
+    })),
+  }
+
   const bounceBackMetric: MetricCard = {
     title: 'Bounce-back',
     value: metricsLoading
@@ -627,6 +965,7 @@ export default function Dashboard() {
     subtitle: selectedSprint
       ? `${selectedSprint.bounceBackTickets} returned tickets`
       : 'No active sprint',
+    tooltip: 'Percent of tickets that returned from QA to development.',
     icon: BookOpen,
     color: 'from-orange-600 to-orange-500',
     trend: metricsLoading ? '...' : '',
@@ -652,7 +991,7 @@ export default function Dashboard() {
     },
     {
       label: 'Oldest open bug',
-      value: `${openBugOldest}d`,
+      value: `${openBugOldestClose}d`,
     },
     {
       label: 'Bounce-back rate',
@@ -669,8 +1008,13 @@ export default function Dashboard() {
       size === 'hero' ? 'text-4xl' : size === 'compact' ? 'text-2xl' : 'text-3xl'
     const cardPadding = size === 'compact' ? 'p-4' : size === 'hero' ? 'p-7' : 'p-6'
     const iconClassName = size === 'compact' ? 'w-5 h-5' : size === 'hero' ? 'w-8 h-8' : 'w-7 h-7'
+    const tooltipText = metric.tooltip || metric.subtitle || metric.title
+    const isExternalUrl = (href?: string) => Boolean(href && /^https?:\/\//.test(href))
     const card = (
-      <div className="glass-card rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all duration-300 animate-slideInUp h-full">
+      <div
+        className="glass-card rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all duration-300 animate-slideInUp h-full"
+        title={tooltipText}
+      >
         <div className={`h-1 bg-gradient-to-r ${metric.color}`}></div>
         <CardContent className={cardPadding}>
           <div className="flex items-start justify-between mb-4">
@@ -742,9 +1086,20 @@ export default function Dashboard() {
                               const content =
                                 typeof value === 'object' && value && 'value' in value ? (
                                   value.href ? (
-                                    <Link href={value.href} className="text-blue-300 hover:text-blue-200">
-                                      {value.value}
-                                    </Link>
+                                    isExternalUrl(value.href) ? (
+                                      <a
+                                        href={value.href}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-300 hover:text-blue-200"
+                                      >
+                                        {value.value}
+                                      </a>
+                                    ) : (
+                                      <Link href={value.href} className="text-blue-300 hover:text-blue-200">
+                                        {value.value}
+                                      </Link>
+                                    )
                                   ) : (
                                     value.value
                                   )
@@ -777,9 +1132,20 @@ export default function Dashboard() {
                         const content =
                           typeof value === 'object' && value && 'value' in value ? (
                             value.href ? (
-                              <Link href={value.href} className="text-blue-300 hover:text-blue-200">
-                                {value.value}
-                              </Link>
+                              isExternalUrl(value.href) ? (
+                                <a
+                                  href={value.href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-300 hover:text-blue-200"
+                                >
+                                  {value.value}
+                                </a>
+                              ) : (
+                                <Link href={value.href} className="text-blue-300 hover:text-blue-200">
+                                  {value.value}
+                                </Link>
+                              )
                             ) : (
                               value.value
                             )
@@ -824,6 +1190,13 @@ export default function Dashboard() {
                 if (!('href' in row) || !row.href) {
                   return <div key={row.label}>{rowContent}</div>
                 }
+                if (isExternalUrl(row.href)) {
+                  return (
+                    <a key={row.label} href={row.href} target="_blank" rel="noopener noreferrer" className="block">
+                      {rowContent}
+                    </a>
+                  )
+                }
                 return (
                   <Link key={row.label} href={row.href} className="block">
                     {rowContent}
@@ -838,6 +1211,13 @@ export default function Dashboard() {
 
     if (!metric.href || metric.filter) {
       return <div key={key}>{card}</div>
+    }
+    if (isExternalUrl(metric.href)) {
+      return (
+        <a key={key} href={metric.href} target="_blank" rel="noopener noreferrer" className="block">
+          {card}
+        </a>
+      )
     }
     return (
       <Link key={key} href={metric.href} className="block">
@@ -964,6 +1344,20 @@ export default function Dashboard() {
         </section>
 
         <section>
+          <div className="mb-4">
+            <h2 className="text-2xl font-bold text-white">Current Sprint Essentials</h2>
+            <p className="text-slate-400 text-sm">
+              Active sprint status, development flow, and story point delivery.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+            {essentialsCards.map((metric, idx) =>
+              renderMetricCard(metric, `essentials-${idx}`)
+            )}
+          </div>
+        </section>
+
+        <section>
           <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-2xl font-bold text-white">Role Slices</h2>
@@ -1036,6 +1430,20 @@ export default function Dashboard() {
 
         <section>
           <div className="mb-4">
+            <h2 className="text-2xl font-bold text-white">Contributor Ranking</h2>
+            <p className="text-slate-400 text-sm">
+              Best to worst contributor totals across all synced sprints.
+            </p>
+          </div>
+          <div className="grid grid-cols-12 gap-6">
+            <div className="col-span-12">
+              {renderMetricCard(contributorRankMetric, 'contributors-rank')}
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-4">
             <h2 className="text-2xl font-bold text-white">Actions and Insights</h2>
             <p className="text-slate-400 text-sm">Keep the next steps visible.</p>
           </div>
@@ -1049,6 +1457,7 @@ export default function Dashboard() {
                       <Card
                         className={`glass-card ${action.borderColor} h-full hover:border-blue-400/50 transition-all duration-300 cursor-pointer group animate-slideInUp`}
                         style={{ animationDelay: `${idx * 150}ms` }}
+                        title={action.description}
                       >
                         <CardHeader>
                           <div className="flex items-start justify-between">
