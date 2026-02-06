@@ -130,6 +130,9 @@ export async function ensureSprintSnapshot(
     plannedTickets: number
     finishedTickets: number
     qaDoneTickets: number
+    plannedScopeTickets: number
+    addedTickets: number
+    removedTickets: number
     storyPointsTotal: number
     storyPointsClosed: number
   }>
@@ -286,13 +289,18 @@ export async function ensureSprintSnapshot(
       .sort((a, b) => b.ticketCount - a.ticketCount || a.name.localeCompare(b.name))
   }
 
-  const plannedTickets = totalsOverride?.plannedTickets ?? totalTickets
+  const totalTicketsValue = totalsOverride?.plannedTickets ?? totalTickets
+  const plannedScopeTickets = totalsOverride?.plannedScopeTickets ?? totalTicketsValue
+  const addedTickets = totalsOverride?.addedTickets ?? 0
+  const removedTickets = totalsOverride?.removedTickets ?? 0
   const finishedTickets = totalsOverride?.finishedTickets ?? closedTickets
   const qaDoneTotal = totalsOverride?.qaDoneTickets ?? qaDoneTickets
   const totalsPayload = {
-    totalTickets: plannedTickets,
+    totalTickets: totalTicketsValue,
     closedTickets: finishedTickets,
-    plannedTickets,
+    plannedTickets: plannedScopeTickets,
+    addedTickets,
+    removedTickets,
     finishedTickets,
     qaDoneTickets: qaDoneTotal,
     storyPointsTotal: totalsOverride?.storyPointsTotal ?? storyPointsTotal,

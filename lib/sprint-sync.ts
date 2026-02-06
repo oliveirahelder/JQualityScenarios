@@ -78,6 +78,34 @@ type JiraSprintReport = {
     completedIssues?: JiraSprintReportIssue[]
     issuesNotCompletedInCurrentSprint?: JiraSprintReportIssue[]
     issuesRemovedFromSprint?: JiraSprintReportIssue[]
+    issueKeysAddedDuringSprint?: string[]
+    issuesAddedDuringSprint?: Array<{ key?: string }>
+  }
+}
+
+function countAddedIssues(contents?: JiraSprintReport['contents']) {
+  if (!contents) return 0
+  const addedKeys =
+    contents.issueKeysAddedDuringSprint ||
+    contents.issuesAddedDuringSprint ||
+    ([] as Array<{ key?: string } | string>)
+  if (Array.isArray(addedKeys)) {
+    return addedKeys.length
+  }
+  return 0
+}
+
+function deriveScopeCounts(report?: JiraSprintReport | null) {
+  const contents = report?.contents
+  const completed = contents?.completedIssues || []
+  const notCompleted = contents?.issuesNotCompletedInCurrentSprint || []
+  const removed = contents?.issuesRemovedFromSprint || []
+  const addedCount = countAddedIssues(contents)
+  const planned = Math.max(0, completed.length + notCompleted.length + removed.length - addedCount)
+  return {
+    plannedTickets: planned,
+    addedTickets: addedCount,
+    removedTickets: removed.length,
   }
 }
 
@@ -121,6 +149,20 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
       let closedTickets = 0
       let storyPointsTotal = 0
       let qaBounceBackCount = 0
+      let scopeCounts = { plannedTickets: 0, addedTickets: 0, removedTickets: 0 }
+
+      if (jiraSprint.boardId) {
+        try {
+          const report = (await getSprintReport(
+            jiraSprint.boardId,
+            jiraSprint.id,
+            credentials
+          )) as JiraSprintReport
+          scopeCounts = deriveScopeCounts(report)
+        } catch (error) {
+          console.warn('[Sprint Sync] Failed to read sprint scope report:', error)
+        }
+      }
 
       // Sync issues in this sprint
       if (jiraSprint.issues) {
@@ -217,6 +259,9 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
           data: {
             totalTickets,
             closedTickets,
+            plannedTickets: scopeCounts.plannedTickets || totalTickets,
+            addedTickets: scopeCounts.addedTickets,
+            removedTickets: scopeCounts.removedTickets,
             successPercent,
             storyPointsTotal,
             qaBounceBackCount,
@@ -407,16 +452,26 @@ async function syncSprintIssuesLite(
   credentials?: JiraCredentials,
   storyPointsFieldId?: string | null
 ) {
+  let scopeCounts = { plannedTickets: 0, addedTickets: 0, removedTickets: 0 }
+  let sprintReport: JiraSprintReport | null = null
+  if (jiraSprint.boardId) {
+    try {
+      sprintReport = (await getSprintReport(
+        jiraSprint.boardId,
+        jiraSprint.id,
+        credentials
+      )) as JiraSprintReport
+      scopeCounts = deriveScopeCounts(sprintReport)
+    } catch (error) {
+      console.warn('[Sprint Sync] Failed to read sprint report for scope counts:', error)
+    }
+  }
   const issues =
     jiraSprint.issues ||
     (await getSprintIssues(jiraSprint.id, credentials, jiraSprint.boardId))
   if (!issues || issues.length === 0) {
     if (jiraSprint.boardId) {
-      const report = (await getSprintReport(
-        jiraSprint.boardId,
-        jiraSprint.id,
-        credentials
-      )) as JiraSprintReport
+      const report = sprintReport
       const completedIssues = report?.contents?.completedIssues || []
       const notCompleted = report?.contents?.issuesNotCompletedInCurrentSprint || []
       if (!completedIssues.length && !notCompleted.length) return
@@ -507,6 +562,9 @@ async function syncSprintIssuesLite(
         data: {
           totalTickets,
           closedTickets,
+          plannedTickets: scopeCounts.plannedTickets || totalTickets,
+          addedTickets: scopeCounts.addedTickets,
+          removedTickets: scopeCounts.removedTickets,
           successPercent,
           storyPointsTotal,
         },
@@ -515,6 +573,9 @@ async function syncSprintIssuesLite(
         plannedTickets: totalTickets,
         finishedTickets: closedTickets,
         qaDoneTickets,
+        plannedScopeTickets: scopeCounts.plannedTickets || totalTickets,
+        addedTickets: scopeCounts.addedTickets,
+        removedTickets: scopeCounts.removedTickets,
         storyPointsTotal,
         storyPointsClosed,
       })
@@ -630,6 +691,9 @@ async function syncSprintIssuesLite(
     data: {
       totalTickets,
       closedTickets,
+      plannedTickets: scopeCounts.plannedTickets || totalTickets,
+      addedTickets: scopeCounts.addedTickets,
+      removedTickets: scopeCounts.removedTickets,
       successPercent,
       storyPointsTotal,
     },

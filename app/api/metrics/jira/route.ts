@@ -61,6 +61,9 @@ type SprintWithTickets = {
   status: string
   totalTickets: number
   closedTickets: number
+  plannedTickets: number
+  addedTickets: number
+  removedTickets: number
   storyPointsTotal: number
   tickets: JiraTicketLite[]
 }
@@ -119,12 +122,19 @@ function buildSprintMetrics(sprint: SprintWithTickets, now: Date) {
     typeof sprint.totalTickets === 'number' && sprint.totalTickets > 0
       ? sprint.totalTickets
       : sprint.tickets.length
+  const plannedTickets =
+    typeof sprint.plannedTickets === 'number' && sprint.plannedTickets > 0
+      ? sprint.plannedTickets
+      : totalTickets
+  const addedTickets = typeof sprint.addedTickets === 'number' ? sprint.addedTickets : 0
+  const removedTickets = typeof sprint.removedTickets === 'number' ? sprint.removedTickets : 0
+  const scopeTickets = Math.max(0, plannedTickets + addedTickets - removedTickets)
   const closedTickets =
     typeof sprint.closedTickets === 'number' && sprint.closedTickets >= 0
       ? sprint.closedTickets
       : sprint.tickets.filter((ticket: JiraTicketLite) => isStrictClosed(ticket.status)).length
-  const successPercent = totalTickets
-    ? Math.round((closedTickets / totalTickets) * 1000) / 10
+  const successPercent = (scopeTickets || totalTickets)
+    ? Math.round((closedTickets / (scopeTickets || totalTickets)) * 1000) / 10
     : 0
   const devTickets = sprint.tickets.filter((ticket: JiraTicketLite) =>
     DEV_STATUSES.some((status) => (ticket.status || '').toLowerCase().includes(status))
@@ -227,6 +237,9 @@ function buildSprintMetrics(sprint: SprintWithTickets, now: Date) {
     storyPointsTotal,
     storyPointsCompleted,
     totalTickets,
+    plannedTickets,
+    addedTickets,
+    removedTickets,
     closedTickets,
     assignees: assigneeTotalsList,
   }

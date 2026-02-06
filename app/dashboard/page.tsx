@@ -524,7 +524,10 @@ export default function Dashboard() {
   const closedTickets = selectedComparison?.activeClosedTickets ?? selectedSprint?.doneTickets ?? 0
   const closedStoryPoints =
     selectedComparison?.activeStoryPointsClosed ?? selectedSprint?.storyPointsCompleted ?? 0
-  const plannedTickets = selectedSprint?.totalTickets ?? 0
+  const plannedTickets = selectedSprint?.plannedTickets ?? selectedSprint?.totalTickets ?? 0
+  const addedTickets = selectedSprint?.addedTickets ?? 0
+  const removedTickets = selectedSprint?.removedTickets ?? 0
+  const scopeTickets = Math.max(0, plannedTickets + addedTickets - removedTickets)
   const plannedStoryPoints = selectedSprint?.storyPointsTotal ?? 0
 
   const essentialsCards: MetricCard[] = [
@@ -551,14 +554,22 @@ export default function Dashboard() {
                 className: selectedSprint.daysLeft < 0 ? 'text-red-300' : 'text-slate-100',
               },
             },
-            {
-              label: 'Planned tickets',
-              value: `${plannedTickets}`,
-            },
-            {
-              label: 'Final phase tickets',
-              value: `${selectedSprint.finalPhaseTickets}`,
-            },
+              {
+                label: 'Planned tickets',
+                value: `${plannedTickets}`,
+              },
+              {
+                label: 'Added mid-sprint',
+                value: `${addedTickets}`,
+              },
+              {
+                label: 'Removed scope',
+                value: `${removedTickets}`,
+              },
+              {
+                label: 'Final phase tickets',
+                value: `${selectedSprint.finalPhaseTickets}`,
+              },
             {
               label: 'Top contributor',
               labelTitle: 'Most final-phase story points closed',
@@ -644,10 +655,10 @@ export default function Dashboard() {
     },
     {
       title: 'Closed + Story Points',
-      value: metricsLoading ? '--' : `${closedTickets} / ${plannedTickets}`,
-      subtitle: 'Closed vs planned (current sprint)',
+      value: metricsLoading ? '--' : `${closedTickets} / ${scopeTickets}`,
+      subtitle: 'Closed vs scope (current sprint)',
       tooltip:
-        'Closed tickets vs planned in the current sprint, with story points closed vs total. Includes previous sprint comparison when available.',
+        'Closed tickets vs total scope (planned + added - removed) for the current sprint, with story points closed vs total. Includes previous sprint comparison when available.',
       icon: CheckCircle2,
       color: 'from-emerald-600 to-emerald-500',
       rows: ([
