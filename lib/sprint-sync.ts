@@ -65,6 +65,8 @@ async function getSprintsPerTeamLimit() {
 }
 
 type JiraSprintReportIssue = {
+  key?: string
+  summary?: string
   estimateStatistic?: { statFieldValue?: { value?: number | string | null } }
   currentEstimateStatistic?: { statFieldValue?: { value?: number | string | null } }
   statusName?: string
@@ -462,6 +464,38 @@ async function syncSprintIssuesLite(
         ) {
           qaDoneTickets += 1
         }
+      }
+
+      const reportIssues = [...completedIssues, ...notCompleted]
+      for (const issue of reportIssues) {
+        const jiraId = issue?.key
+        if (!jiraId) continue
+        const value =
+          issue?.estimateStatistic?.statFieldValue?.value ??
+          issue?.currentEstimateStatistic?.statFieldValue?.value
+        const points =
+          typeof value === 'number'
+            ? value
+            : value != null
+            ? Number(value)
+            : null
+        const storyPoints = Number.isNaN(points as number) ? null : points
+        await prisma.ticket.upsert({
+          where: { jiraId },
+          update: {
+            sprintId,
+            summary: issue.summary || jiraId,
+            status: issue.statusName || issue.status || 'Unknown',
+            storyPoints,
+          },
+          create: {
+            sprintId,
+            jiraId,
+            summary: issue.summary || jiraId,
+            status: issue.statusName || issue.status || 'Unknown',
+            storyPoints,
+          },
+        })
       }
 
       const successPercent = totalTickets
