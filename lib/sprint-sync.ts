@@ -298,7 +298,10 @@ function isStrictClosedStatus(status: string) {
  * Sync recently closed sprints
  * Call this once daily
  */
-export async function syncRecentClosedSprints(credentials?: JiraCredentials) {
+export async function syncRecentClosedSprints(
+  credentials?: JiraCredentials,
+  options?: { force?: boolean }
+) {
   try {
     console.log('[Sprint Sync] Starting recently closed sprints sync...')
 
@@ -311,9 +314,36 @@ export async function syncRecentClosedSprints(credentials?: JiraCredentials) {
       ),
       sprintsPerTeamLimit
     )
+    const keepJiraIds = new Set(limitedClosedSprints.map((sprint) => sprint.id.toString()))
+    const existingSprints = await prisma.sprint.findMany({
+      where: { jiraId: { in: Array.from(keepJiraIds) } },
+      select: { id: true, jiraId: true },
+    })
+    const sprintByJiraId = new Map(existingSprints.map((sprint) => [sprint.jiraId, sprint.id]))
+    const existingSnapshots = await prisma.sprintSnapshot.findMany({
+      where: { jiraId: { in: Array.from(keepJiraIds) } },
+      select: { jiraId: true },
+    })
+    const snapshotJiraIds = new Set(existingSnapshots.map((snapshot) => snapshot.jiraId))
 
     for (const jiraSprint of limitedClosedSprints) {
       const normalized = normalizeSprint(jiraSprint)
+      const existingSprintId = sprintByJiraId.get(normalized.jiraId)
+      const hasSnapshot = snapshotJiraIds.has(normalized.jiraId)
+
+      if (!options?.force && existingSprintId && hasSnapshot) {
+        await prisma.sprint.update({
+          where: { id: existingSprintId },
+          data: {
+            name: normalized.name,
+            startDate: normalized.startDate,
+            endDate: normalized.endDate,
+            completedAt: normalized.completedAt,
+            status: 'COMPLETED',
+          },
+        })
+        continue
+      }
 
       const sprint = await prisma.sprint.upsert({
         where: { jiraId: normalized.jiraId },
@@ -354,7 +384,10 @@ export async function syncRecentClosedSprints(credentials?: JiraCredentials) {
  * Sync all closed sprints (no date window)
  * Call manually for historical backfill
  */
-export async function syncAllClosedSprints(credentials?: JiraCredentials) {
+export async function syncAllClosedSprints(
+  credentials?: JiraCredentials,
+  options?: { force?: boolean }
+) {
   try {
     console.log('[Sprint Sync] Starting all closed sprints sync...')
 
@@ -368,6 +401,25 @@ export async function syncAllClosedSprints(credentials?: JiraCredentials) {
       sprintsPerTeamLimit
     )
     const keepJiraIds = new Set(limitedClosedSprints.map((sprint) => sprint.id.toString()))
+    const existingSprints = await prisma.sprint.findMany({
+      where: {
+        jiraId: { in: Array.from(keepJiraIds) },
+      },
+      select: {
+        id: true,
+        jiraId: true,
+      },
+    })
+    const sprintByJiraId = new Map(existingSprints.map((sprint) => [sprint.jiraId, sprint.id]))
+    const existingSnapshots = await prisma.sprintSnapshot.findMany({
+      where: {
+        jiraId: { in: Array.from(keepJiraIds) },
+      },
+      select: {
+        jiraId: true,
+      },
+    })
+    const snapshotJiraIds = new Set(existingSnapshots.map((snapshot) => snapshot.jiraId))
 
     await prisma.sprint.deleteMany({
       where: {
@@ -379,6 +431,23 @@ export async function syncAllClosedSprints(credentials?: JiraCredentials) {
     const sprintIds: string[] = []
     for (const jiraSprint of limitedClosedSprints) {
       const normalized = normalizeSprint(jiraSprint)
+      const existingSprintId = sprintByJiraId.get(normalized.jiraId)
+      const hasSnapshot = snapshotJiraIds.has(normalized.jiraId)
+
+      if (!options?.force && existingSprintId && hasSnapshot) {
+        await prisma.sprint.update({
+          where: { id: existingSprintId },
+          data: {
+            name: normalized.name,
+            startDate: normalized.startDate,
+            endDate: normalized.endDate,
+            completedAt: normalized.completedAt,
+            status: 'COMPLETED',
+          },
+        })
+        sprintIds.push(existingSprintId)
+        continue
+      }
 
       const sprint = await prisma.sprint.upsert({
         where: { jiraId: normalized.jiraId },
@@ -425,13 +494,16 @@ export async function syncAllClosedSprints(credentials?: JiraCredentials) {
 /**
  * Manual trigger to sync all sprints (admin only)
  */
-export async function syncAllSprints(credentials?: JiraCredentials) {
+export async function syncAllSprints(
+  credentials?: JiraCredentials,
+  options?: { force?: boolean }
+) {
   try {
     console.log('[Sprint Sync] Starting full sync...')
 
     const [activeSyncResult, closedSyncResult] = await Promise.all([
       syncActiveSprints(credentials),
-      syncAllClosedSprints(credentials),
+      syncAllClosedSprints(credentials, options),
     ])
 
     console.log('[Sprint Sync] Full sync completed')

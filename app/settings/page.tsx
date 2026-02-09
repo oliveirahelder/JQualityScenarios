@@ -793,7 +793,7 @@ export default function SettingsPage() {
           Authorization: `Bearer ${authToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ type: 'all' }),
+        body: JSON.stringify({ type: 'all', force: true }),
       })
       const data = await response.json()
       if (!response.ok) {
@@ -802,7 +802,7 @@ export default function SettingsPage() {
       const now = new Date().toISOString()
       setJiraLastSyncAt(now)
       localStorage.setItem('jiraLastSyncAt', now)
-      setJiraSyncMessage('Jira sync complete.')
+      setJiraSyncMessage('Jira force resync complete.')
     } catch (err) {
       setJiraSyncError(err instanceof Error ? err.message : 'Failed to sync Jira')
     } finally {
@@ -909,7 +909,7 @@ export default function SettingsPage() {
                           onClick={handleJiraSync}
                           disabled={jiraSyncing}
                         >
-                          {jiraSyncing ? 'Syncing Jira...' : 'Sync Jira'}
+                          {jiraSyncing ? 'Force syncing...' : 'Force Jira Resync'}
                         </Button>
                       ) : null}
                       <div className="flex items-center gap-1">

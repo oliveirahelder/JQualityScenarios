@@ -38,7 +38,7 @@ export const POST = withAuth(
         )
       }
 
-      const { type = 'all', boardUrl, boardIds } = await req.json()
+      const { type = 'all', boardUrl, boardIds, force } = await req.json()
 
       const overrideBoardIds = parseBoardIds(boardIds, boardUrl)
       const credentials: JiraCredentials = overrideBoardIds
@@ -52,14 +52,14 @@ export const POST = withAuth(
           result = await syncActiveSprints(credentials)
           break
         case 'closed':
-          result = await syncRecentClosedSprints(credentials)
+          result = await syncRecentClosedSprints(credentials, { force })
           break
         case 'closed_all':
-          result = await syncAllClosedSprints(credentials)
+          result = await syncAllClosedSprints(credentials, { force })
           break
         case 'all':
         default:
-          result = await syncAllSprints(credentials)
+          result = await syncAllSprints(credentials, { force })
       }
 
       return NextResponse.json({
