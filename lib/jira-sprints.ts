@@ -187,6 +187,12 @@ type JiraSprintEventRaw = {
 type JiraBoard = {
   id: number
   name?: string
+  location?: {
+    projectId?: number
+    projectKey?: string
+    projectName?: string
+    displayName?: string
+  }
 }
 
 function matchStatus(value: string, targets: string[]) {
@@ -472,16 +478,39 @@ export async function getSprintIssues(
 /**
  * Get all boards available
  */
-export async function getAllBoards(credentials?: JiraCredentials): Promise<JiraBoard[]> {
+export async function getAllBoards(
+  credentials?: JiraCredentials,
+  options?: { type?: 'scrum' | 'kanban' | 'simple' | 'all' }
+): Promise<JiraBoard[]> {
   try {
-    const response = await getAgileClient(credentials).get('/board', {
-      params: {
-        maxResults: 50,
-        type: 'scrum',
-      },
-    })
+    const results: JiraBoard[] = []
+    let startAt = 0
+    const maxResults = 50
+    const typeFilter = options?.type ?? 'scrum'
 
-    return (response.data.values || []) as JiraBoard[]
+    while (true) {
+      const response = await getAgileClient(credentials).get('/board', {
+        params: {
+          startAt,
+          maxResults,
+          ...(typeFilter !== 'all' ? { type: typeFilter } : {}),
+        },
+      })
+
+      const values = (response.data.values || []) as JiraBoard[]
+      results.push(...values)
+
+      const total = typeof response.data.total === 'number' ? response.data.total : null
+      const isLast = response.data.isLast === true
+
+      if (isLast) break
+      if (values.length < maxResults) break
+      if (total !== null && startAt + values.length >= total) break
+
+      startAt += values.length
+    }
+
+    return results
   } catch (error) {
     const axiosError = error as AxiosError
     const errorMessage = axiosError.response?.data || axiosError.message || 'Unknown error'

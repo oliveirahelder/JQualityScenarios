@@ -82,6 +82,7 @@ export default function SprintsPage() {
     Record<string, 'all' | 'active' | 'completed'>
   >({})
   const [selectedCompletedByTeam, setSelectedCompletedByTeam] = useState<Record<string, string>>({})
+  const [selectedTeamKey, setSelectedTeamKey] = useState('all')
   const router = useRouter()
   const searchParams = useSearchParams()
   const carouselRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -116,6 +117,9 @@ export default function SprintsPage() {
     const percent = total ? Math.round((finished / total) * 1000) / 10 : 0
     return { total, finished, percent }
   }
+
+  const getCarryoverTickets = (sprint: SprintItem) =>
+    (sprint.tickets || []).filter((ticket) => (ticket.carryoverCount || 0) > 0).length
 
   const getFinishedTickets = (sprint: SprintItem) => {
     const finished = sprint?.snapshotTotals?.finishedTickets
@@ -495,6 +499,10 @@ export default function SprintsPage() {
   }, [sprints])
 
   const teamKeys = useMemo(() => Array.from(sprintsByTeam.keys()).sort(), [sprintsByTeam])
+  const visibleTeamKeys = useMemo(
+    () => (selectedTeamKey === 'all' ? teamKeys : teamKeys.filter((key) => key === selectedTeamKey)),
+    [teamKeys, selectedTeamKey]
+  )
   const sprintSummary = useMemo(() => {
     const activeCount = sprints.filter(isActiveSprint).length
     const completedCount = sprints.filter(isCompletedSprint).length
@@ -537,6 +545,12 @@ export default function SprintsPage() {
     })
   }, [sprintsByTeam, isCompletedSprint])
 
+  useEffect(() => {
+    if (selectedTeamKey !== 'all' && !teamKeys.includes(selectedTeamKey)) {
+      setSelectedTeamKey('all')
+    }
+  }, [teamKeys, selectedTeamKey])
+
   const handleClearSprintFilters = (sprintId: string) => {
     setFilterBySprint((prev) => {
       const next = { ...prev }
@@ -562,6 +576,7 @@ export default function SprintsPage() {
     setExpandedSprints({})
     setTeamViewFilter({})
     setSelectedCompletedByTeam({})
+    setSelectedTeamKey('all')
     router.replace('/sprints')
   }
 
@@ -595,6 +610,21 @@ export default function SprintsPage() {
               <span className="rounded-full border border-blue-500/30 px-3 py-1 text-blue-300">
                 Completed: <span className="text-blue-200 font-semibold">{sprintSummary.completed}</span>
               </span>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500">Team</span>
+                <select
+                  value={selectedTeamKey}
+                  onChange={(event) => setSelectedTeamKey(event.target.value)}
+                  className="bg-slate-900/70 border border-slate-700/50 text-slate-200 text-xs rounded-md px-2 py-1"
+                >
+                  <option value="all">All teams</option>
+                  {teamKeys.map((teamKey) => (
+                    <option key={teamKey} value={teamKey}>
+                      {teamKey}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
           <Button
@@ -624,8 +654,8 @@ export default function SprintsPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-6">
-            {teamKeys.map((teamKey, teamIndex) => {
+          <div className="grid gap-4">
+            {visibleTeamKeys.map((teamKey, teamIndex) => {
               const teamSprints = sprintsByTeam.get(teamKey) || []
               const activeSprints = teamSprints.filter(isActiveSprint)
               const completedSprints = teamSprints
@@ -679,10 +709,10 @@ export default function SprintsPage() {
               return (
                 <Card
                   key={teamKey}
-                  className="glass-card border-slate-700/30 transition-all duration-300 animate-slideInUp h-[52vh] lg:h-[58vh] flex flex-col min-w-0 overflow-hidden"
+                  className="glass-card border-slate-700/30 transition-all duration-300 animate-slideInUp flex flex-col min-w-0"
                   style={{ animationDelay: `${teamIndex * 75}ms` }}
                 >
-                  <CardContent className="p-6 flex flex-col h-full min-h-0 min-w-0">
+                  <CardContent className="p-5 flex flex-col min-w-0">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-start lg:gap-6 shrink-0 min-w-0">
                       <div>
                         <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Team</div>
@@ -853,7 +883,7 @@ export default function SprintsPage() {
                       </div>
                       <div
                         ref={setCarouselRef(teamKey)}
-                        className="flex w-full max-w-full gap-4 overflow-x-auto pb-2 scroll-smooth snap-x snap-mandatory"
+                        className="flex w-full max-w-full gap-3 overflow-x-auto pb-2 scroll-smooth snap-x snap-mandatory"
                       >
                         {visibleSprints.length === 0 ? (
                           <div className="text-xs text-slate-500">No sprints for this filter.</div>
@@ -945,7 +975,7 @@ export default function SprintsPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-7 gap-4 mt-4 pt-4 border-t border-slate-700/30">
+                      <div className="grid grid-cols-2 md:grid-cols-8 gap-4 mt-4 pt-4 border-t border-slate-700/30">
                         <div>
                           <div className="text-slate-500 text-xs mb-1">Tickets Finished</div>
                           <div className="text-xl font-bold text-white">{getFinishedTickets(sprint)}</div>
@@ -953,6 +983,22 @@ export default function SprintsPage() {
                         <div>
                           <div className="text-slate-500 text-xs mb-1">Tickets Planned</div>
                           <div className="text-xl font-bold text-white">{getPlannedTickets(sprint)}</div>
+                        </div>
+                        <div>
+                          <div className="text-slate-500 text-xs mb-1">Carryover</div>
+                          {(() => {
+                            const carryover = getCarryoverTickets(sprint)
+                            const planned = getPlannedTickets(sprint)
+                            const plannedNew = Math.max(0, planned - carryover)
+                            return (
+                              <>
+                                <div className="text-xl font-bold text-white">{carryover}</div>
+                                <div className="text-xs text-slate-400 mt-1">
+                                  New: {plannedNew}
+                                </div>
+                              </>
+                            )
+                          })()}
                         </div>
                         <div>
                           <div className="text-slate-500 text-xs mb-1">Developers</div>

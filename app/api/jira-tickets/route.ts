@@ -20,6 +20,7 @@ export const POST = withAuth(
     try {
       const payload = req.user
       const { summary, issueType, description, labels } = await req.json()
+      const resolvedIssueType = issueType || 'Task'
 
       if (!summary || !description) {
         return NextResponse.json(
@@ -28,7 +29,7 @@ export const POST = withAuth(
         )
       }
 
-      if (issueType && !ALLOWED_ISSUE_TYPES.has(issueType)) {
+      if (!ALLOWED_ISSUE_TYPES.has(resolvedIssueType)) {
         return NextResponse.json(
           { error: 'Invalid issue type' },
           { status: 400 }
@@ -70,17 +71,59 @@ export const POST = withAuth(
           projectKey: PROJECT_KEY,
           summary,
           description,
-          issueType,
+          issueType: resolvedIssueType,
           labels: normalizedLabels,
         },
         jiraCredentials
       )
+
+      await prisma.jiraTicketCreation.create({
+        data: {
+          userId: user.id,
+          jiraKey: result.key,
+          jiraUrl: result.url,
+          summary,
+          issueType: resolvedIssueType,
+          labels: normalizedLabels.length > 0 ? normalizedLabels.join(',') : null,
+        },
+      })
 
       return NextResponse.json({ ticketKey: result.key, url: result.url })
     } catch (error) {
       console.error('Error creating Jira ticket:', error)
       return NextResponse.json(
         { error: error instanceof Error ? error.message : 'Failed to create Jira ticket' },
+        { status: 500 }
+      )
+    }
+  })
+)
+
+export const GET = withAuth(
+  withRole('QA', 'ADMIN')(async (req: NextRequest & { user?: any }) => {
+    try {
+      const payload = req.user
+      const history = await prisma.jiraTicketCreation.findMany({
+        where: { userId: payload.userId },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      })
+
+      return NextResponse.json({
+        history: history.map((item) => ({
+          id: item.id,
+          jiraKey: item.jiraKey,
+          jiraUrl: item.jiraUrl,
+          summary: item.summary,
+          issueType: item.issueType,
+          labels: item.labels ? item.labels.split(',').map((label) => label.trim()) : [],
+          createdAt: item.createdAt,
+        })),
+      })
+    } catch (error) {
+      console.error('Error loading Jira ticket history:', error)
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Failed to load history' },
         { status: 500 }
       )
     }

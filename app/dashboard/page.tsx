@@ -1436,8 +1436,9 @@ export default function Dashboard() {
             <p className="text-slate-400 text-sm">Risk, delivery, and workload signals.</p>
           </div>
           <div className="grid grid-cols-12 gap-6">
-            <div className="col-span-12 xl:col-span-7">
+            <div className="col-span-12 xl:col-span-7 space-y-4">
               {renderMetricCard(riskMetric, 'risk')}
+              {renderMetricCard(bounceBackMetric, 'bounce')}
             </div>
             <div className="col-span-12 xl:col-span-5 space-y-4">
               {deliveryMetrics.length ? (
@@ -1455,11 +1456,8 @@ export default function Dashboard() {
 
         <section>
           <div className="grid grid-cols-12 gap-6">
-            <div className="col-span-12 xl:col-span-7">
+            <div className="col-span-12">
               {renderMetricCard(assigneesMetric, 'assignees')}
-            </div>
-            <div className="col-span-12 xl:col-span-5">
-              {renderMetricCard(bounceBackMetric, 'bounce')}
             </div>
           </div>
         </section>

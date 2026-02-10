@@ -56,6 +56,7 @@ model User {
   testScenarios TestScenario[]
   settingsBackups SettingsBackup[]
   documentationAttachments DocumentationAttachment[]
+  createdTickets JiraTicketCreation[]
 
   @@map("users")
 }
@@ -313,6 +314,22 @@ model DocumentationDraftTicket {
   @@map("documentation_draft_tickets")
   @@unique([documentationDraftId, ticketId])
   @@index([ticketId])
+}
+
+model JiraTicketCreation {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jiraKey   String
+  jiraUrl   String?
+  summary   String
+  issueType String
+  labels    String?
+  createdAt DateTime @default(now())
+
+  @@map("jira_ticket_creations")
+  @@index([userId, createdAt])
+  @@index([jiraKey])
 }
 
 // Deployment model - tracks CI/CD deployments to environments

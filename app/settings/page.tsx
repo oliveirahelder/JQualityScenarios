@@ -61,6 +61,19 @@ export default function SettingsPage() {
     requestTimeout: 30000,
     hasToken: false,
   })
+  const [jiraBoardsLoading, setJiraBoardsLoading] = useState(false)
+  const [jiraBoardsError, setJiraBoardsError] = useState('')
+  const [jiraBoards, setJiraBoards] = useState<
+    { id: number; name?: string; projectKey?: string; projectName?: string }[]
+  >([])
+  const [jiraBoardsScope, setJiraBoardsScope] = useState<'jmia' | 'all'>('jmia')
+  const [jiraBoardsStats, setJiraBoardsStats] = useState<{
+    scope: string
+    total: number
+    matched: number
+  } | null>(null)
+  const [jiraBoardSearch, setJiraBoardSearch] = useState('')
+  const [jiraBoardsShowAll, setJiraBoardsShowAll] = useState(false)
   const jiraTimeoutMs = 30000
 
   const [confluenceLoading, setConfluenceLoading] = useState(true)
@@ -433,6 +446,36 @@ export default function SettingsPage() {
     const saved = await saveJiraSettings()
     if (saved) {
       await handleJiraTest()
+    }
+  }
+
+  const handleLoadJiraBoards = async (scope: 'jmia' | 'all' = 'jmia') => {
+    setJiraBoardsError('')
+    setJiraBoardsLoading(true)
+    setJiraBoardsScope(scope)
+    setJiraBoardsShowAll(false)
+    try {
+      const authToken = localStorage.getItem('token')
+      const response = await fetch(`/api/integrations/jira/boards?scope=${scope}`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      })
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to load Jira boards')
+      }
+      const data = await response.json()
+      setJiraBoards(Array.isArray(data.boards) ? data.boards : [])
+      setJiraBoardsStats(
+        typeof data.total === 'number' && typeof data.matched === 'number'
+          ? { scope: data.scope || scope, total: data.total, matched: data.matched }
+          : null
+      )
+    } catch (error) {
+      setJiraBoardsError(
+        error instanceof Error ? error.message : 'Failed to load Jira boards'
+      )
+    } finally {
+      setJiraBoardsLoading(false)
     }
   }
 
@@ -1003,6 +1046,102 @@ export default function SettingsPage() {
                           disabled={Boolean(jiraBoardUrl.trim())}
                           className="bg-slate-800/50 border-slate-700 disabled:opacity-50"
                         />
+                        <div className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-3 space-y-2">
+                          <div className="flex items-center justify-between text-xs text-slate-400">
+                            <span>
+                              Need board IDs? List JMIA boards you can access.
+                              {jiraBoardsStats ? (
+                                <span className="ml-1 text-slate-500">
+                                  ({jiraBoardsStats.matched}/{jiraBoardsStats.total})
+                                </span>
+                              ) : null}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              onClick={() => handleLoadJiraBoards('jmia')}
+                              disabled={jiraBoardsLoading}
+                              className="text-slate-300 hover:text-white hover:bg-slate-800/60"
+                            >
+                              {jiraBoardsLoading ? 'Loading...' : 'List Jira Boards'}
+                            </Button>
+                          </div>
+                          {jiraBoardsError ? (
+                            <div className="text-xs text-red-300">{jiraBoardsError}</div>
+                          ) : null}
+                          {jiraBoards.length > 0 ? (
+                            <div className="max-h-40 overflow-y-auto text-xs text-slate-200">
+                              <div className="flex flex-col gap-2 pb-2">
+                                <Input
+                                  placeholder="Search boards..."
+                                  value={jiraBoardSearch}
+                                  onChange={(e) => setJiraBoardSearch(e.target.value)}
+                                  className="bg-slate-800/50 border-slate-700 text-xs"
+                                />
+                                <div className="flex items-center justify-between text-[11px] text-slate-500">
+                                  <span>
+                                    Showing{' '}
+                                    {Math.min(
+                                      jiraBoardsShowAll
+                                        ? jiraBoards.length
+                                        : 25,
+                                      jiraBoards.length
+                                    )}{' '}
+                                    of {jiraBoards.length} boards
+                                  </span>
+                                  {jiraBoards.length > 25 ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      onClick={() => setJiraBoardsShowAll((prev) => !prev)}
+                                      className="h-auto px-2 py-1 text-[11px] text-slate-300 hover:text-white"
+                                    >
+                                      {jiraBoardsShowAll ? 'Show less' : 'Show all'}
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <ul className="space-y-1">
+                                {jiraBoards
+                                  .filter((board) => {
+                                    if (!jiraBoardSearch.trim()) return true
+                                    const query = jiraBoardSearch.toLowerCase()
+                                    return (
+                                      (board.name || '').toLowerCase().includes(query) ||
+                                      (board.projectKey || '').toLowerCase().includes(query) ||
+                                      (board.projectName || '').toLowerCase().includes(query)
+                                    )
+                                  })
+                                  .slice(0, jiraBoardsShowAll ? jiraBoards.length : 25)
+                                  .map((board) => (
+                                    <li key={board.id} className="flex items-center justify-between">
+                                      <span className="truncate">
+                                        {board.projectKey ? `[${board.projectKey}] ` : ''}
+                                        {board.name || 'Unnamed board'}
+                                      </span>
+                                      <span className="ml-2 rounded bg-slate-800/70 px-2 py-0.5 font-mono text-[10px] text-slate-300">
+                                        ID {board.id}
+                                      </span>
+                                    </li>
+                                  ))}
+                              </ul>
+                            </div>
+                          ) : (
+                            <div className="space-y-2 text-xs text-slate-500">
+                              <div>Click “List Jira Boards” to load your accessible JMIA boards.</div>
+                              {jiraBoardsScope === 'jmia' ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => handleLoadJiraBoards('all')}
+                                  className="border-slate-700 text-slate-300"
+                                >
+                                  Show all accessible boards
+                                </Button>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
                         <Input
                           placeholder="Sprint Field ID (customfield_XXXXX)"
                           value={jiraSettings.sprintFieldId}

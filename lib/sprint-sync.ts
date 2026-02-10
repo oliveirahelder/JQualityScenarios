@@ -16,6 +16,7 @@ import { ensureSprintSnapshot } from '@/lib/sprint-snapshot'
 
 const DEFAULT_SPRINTS_PER_TEAM_LIMIT = 10
 const MAX_SPRINTS_PER_TEAM_LIMIT = 50
+const ACTIVE_TEAM_CUTOFF = new Date('2026-01-01T00:00:00.000Z')
 
 function getTeamKey(name: string) {
   const trimmed = name.trim()
@@ -119,8 +120,21 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
 
     const jiraSprints = await getActiveSprints(credentials)
     const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
+    const activeTeamKeys = new Set<string>()
+    const filteredActiveSprints = jiraSprints.filter((jiraSprint) => {
+      const normalized = normalizeSprint(jiraSprint)
+      if (!normalized.startDate || Number.isNaN(normalized.startDate.getTime())) {
+        activeTeamKeys.add(getTeamKey(normalized.name))
+        return true
+      }
+      const isActiveFromCutoff = normalized.startDate >= ACTIVE_TEAM_CUTOFF
+      if (isActiveFromCutoff) {
+        activeTeamKeys.add(getTeamKey(normalized.name))
+      }
+      return isActiveFromCutoff
+    })
 
-    for (const jiraSprint of jiraSprints) {
+    for (const jiraSprint of filteredActiveSprints) {
       const normalized = normalizeSprint(jiraSprint)
 
       // Create or update sprint
@@ -275,7 +289,11 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
     }
 
     console.log('[Sprint Sync] Active sprints sync completed')
-    return { success: true, sprintCount: jiraSprints.length }
+    return {
+      success: true,
+      sprintCount: filteredActiveSprints.length,
+      activeTeamKeys: Array.from(activeTeamKeys),
+    }
   } catch (error) {
     console.error('[Sprint Sync] Error syncing active sprints:', error)
     throw error
@@ -300,7 +318,7 @@ function isStrictClosedStatus(status: string) {
  */
 export async function syncRecentClosedSprints(
   credentials?: JiraCredentials,
-  options?: { force?: boolean }
+  options?: { force?: boolean; activeTeamKeys?: Set<string> }
 ) {
   try {
     console.log('[Sprint Sync] Starting recently closed sprints sync...')
@@ -308,8 +326,11 @@ export async function syncRecentClosedSprints(
     const closedSprints = await getRecentClosedSprints(credentials)
     const sprintsPerTeamLimit = await getSprintsPerTeamLimit()
     const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
+    const filteredClosedSprints = options?.activeTeamKeys
+      ? closedSprints.filter((sprint) => options.activeTeamKeys?.has(getTeamKey(sprint.name)))
+      : closedSprints
     const limitedClosedSprints = limitClosedSprintsByTeam(
-      closedSprints.sort(
+      filteredClosedSprints.sort(
         (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
       ),
       sprintsPerTeamLimit
@@ -386,7 +407,7 @@ export async function syncRecentClosedSprints(
  */
 export async function syncAllClosedSprints(
   credentials?: JiraCredentials,
-  options?: { force?: boolean }
+  options?: { force?: boolean; activeTeamKeys?: Set<string> }
 ) {
   try {
     console.log('[Sprint Sync] Starting all closed sprints sync...')
@@ -394,8 +415,11 @@ export async function syncAllClosedSprints(
     const closedSprints = await getAllClosedSprints(credentials)
     const sprintsPerTeamLimit = await getSprintsPerTeamLimit()
     const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
+    const filteredClosedSprints = options?.activeTeamKeys
+      ? closedSprints.filter((sprint) => options.activeTeamKeys?.has(getTeamKey(sprint.name)))
+      : closedSprints
     const limitedClosedSprints = limitClosedSprintsByTeam(
-      closedSprints.sort(
+      filteredClosedSprints.sort(
         (a, b) => getSprintEndDate(b)!.getTime() - getSprintEndDate(a)!.getTime()
       ),
       sprintsPerTeamLimit
@@ -501,20 +525,52 @@ export async function syncAllSprints(
   try {
     console.log('[Sprint Sync] Starting full sync...')
 
-    const [activeSyncResult, closedSyncResult] = await Promise.all([
-      syncActiveSprints(credentials),
-      syncAllClosedSprints(credentials, options),
-    ])
+    const activeSyncResult = await syncActiveSprints(credentials)
+    const activeTeamKeys = new Set<string>(
+      Array.isArray(activeSyncResult.activeTeamKeys) ? activeSyncResult.activeTeamKeys : []
+    )
+    const closedSyncResult = await syncAllClosedSprints(
+      credentials,
+      activeTeamKeys.size > 0 ? { ...options, activeTeamKeys } : options
+    )
+    const cleanupResult =
+      activeTeamKeys.size > 0 ? await purgeInactiveTeams(activeTeamKeys) : { prunedSprints: 0 }
 
     console.log('[Sprint Sync] Full sync completed')
     return {
       activeSprints: activeSyncResult,
       closedSprints: closedSyncResult,
+      cleanup: cleanupResult,
     }
   } catch (error) {
     console.error('[Sprint Sync] Error during full sync:', error)
     throw error
   }
+}
+
+async function purgeInactiveTeams(activeTeamKeys: Set<string>) {
+  if (!activeTeamKeys || activeTeamKeys.size === 0) {
+    return { prunedSprints: 0 }
+  }
+
+  const allSprints = await prisma.sprint.findMany({
+    select: { id: true, name: true },
+  })
+  const toDelete = allSprints.filter(
+    (sprint) => !activeTeamKeys.has(getTeamKey(sprint.name))
+  )
+
+  if (toDelete.length === 0) {
+    return { prunedSprints: 0 }
+  }
+
+  await prisma.sprint.deleteMany({
+    where: {
+      id: { in: toDelete.map((sprint) => sprint.id) },
+    },
+  })
+
+  return { prunedSprints: toDelete.length }
 }
 
 async function syncSprintIssuesLite(
