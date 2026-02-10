@@ -134,7 +134,7 @@ export type JiraCreateIssueInput = {
   labels?: string[]
 }
 
-const buildJiraDescription = (text: string, deployment: 'cloud' | 'datacenter') => {
+export const buildJiraDescription = (text: string, deployment: 'cloud' | 'datacenter') => {
   if (deployment === 'cloud') {
     return {
       type: 'doc',
@@ -155,6 +155,62 @@ const buildJiraDescription = (text: string, deployment: 'cloud' | 'datacenter') 
     }
   }
   return text
+}
+
+export async function addJiraComment(
+  ticketId: string,
+  comment: string,
+  credentials?: JiraCredentials
+): Promise<{ id?: string; url?: string }> {
+  const baseUrl = credentials?.baseUrl || process.env.JIRA_BASE_URL
+  const user = credentials?.user || process.env.JIRA_USER
+  const token = credentials?.token || process.env.JIRA_API_TOKEN
+  const authType = credentials?.authType || 'basic'
+  const deployment = credentials?.deployment || 'cloud'
+  const apiVersion = deployment === 'datacenter' ? '2' : '3'
+
+  if (!baseUrl || !token || (authType === 'basic' && !user)) {
+    throw new Error('Jira credentials not configured')
+  }
+
+  if (!ticketId || !comment?.trim()) {
+    throw new Error('Missing Jira ticket id or comment')
+  }
+
+  const body = buildJiraDescription(comment.trim(), deployment)
+
+  try {
+    const response = await axios.post(
+      `${baseUrl}/rest/api/${apiVersion}/issue/${ticketId}/comment`,
+      { body },
+      {
+        auth:
+          authType === 'basic'
+            ? {
+                username: user as string,
+                password: token,
+              }
+            : undefined,
+        headers:
+          authType === 'oauth' || authType === 'bearer'
+            ? {
+                Authorization: `Bearer ${token}`,
+              }
+            : undefined,
+      }
+    )
+
+    const id = response.data?.id?.toString?.()
+    return {
+      id,
+      url: id
+        ? `${baseUrl.replace(/\/+$/, '')}/browse/${ticketId}?focusedCommentId=${id}`
+        : undefined,
+    }
+  } catch (error) {
+    console.error('Error creating Jira comment:', error)
+    throw new Error('Failed to publish Jira comment')
+  }
 }
 
 export async function createJiraTicket(

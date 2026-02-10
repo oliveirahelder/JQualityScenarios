@@ -53,6 +53,10 @@ export default function GenerateScenariosPage() {
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [attachmentsLoading, setAttachmentsLoading] = useState(false)
   const [attachmentsError, setAttachmentsError] = useState('')
+  const [manualTemplate, setManualTemplate] = useState('')
+  const [publishing, setPublishing] = useState(false)
+  const [publishError, setPublishError] = useState('')
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null)
 
   const loadAttachments = async (currentTicketId: string) => {
     setAttachmentsLoading(true)
@@ -88,6 +92,7 @@ export default function GenerateScenariosPage() {
     }
     loadAttachments(ticketId)
   }, [ticketId])
+
 
   const handleAttachmentUpload = async (file: File) => {
     if (!ticketId) {
@@ -211,6 +216,14 @@ export default function GenerateScenariosPage() {
     return [header, ...rows].join('\n')
   }
 
+  useEffect(() => {
+    if (!result?.jiraDetails?.id) return
+    const template = buildJiraCommentTable(result.manualScenarios, result.scenarios)
+    setManualTemplate(template)
+    setPublishError('')
+    setPublishedUrl(null)
+  }, [result?.jiraDetails?.id])
+
   const buildDocumentationContent = (data: ScenarioResult) => {
     const ticketTitle = data.ticketRef?.summary || data.jiraDetails.summary
     return [
@@ -258,7 +271,9 @@ export default function GenerateScenariosPage() {
           content,
           requirements,
           technicalNotes: buildGherkinContent(result.scenarios),
-          testResults: buildJiraCommentTable(result.manualScenarios, result.scenarios),
+          testResults:
+            manualTemplate ||
+            buildJiraCommentTable(result.manualScenarios, result.scenarios),
         }),
       })
 
@@ -273,6 +288,47 @@ export default function GenerateScenariosPage() {
       setSaveError(err instanceof Error ? err.message : 'Failed to save scenarios')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handlePublishToJira = async () => {
+    if (!result?.jiraDetails?.id) {
+      setPublishError('Generate scenarios before publishing.')
+      return
+    }
+    if (!manualTemplate.trim()) {
+      setPublishError('Manual template is empty.')
+      return
+    }
+    setPublishError('')
+    setPublishing(true)
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch('/api/scenarios/publish', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ticketId: result.jiraDetails.id,
+          comment: manualTemplate,
+        }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to publish comment')
+      }
+
+      const data = await response.json()
+      setPublishedUrl(data.published?.url || null)
+      setCopied(-4)
+      setTimeout(() => setCopied(null), 2000)
+    } catch (err) {
+      setPublishError(err instanceof Error ? err.message : 'Failed to publish comment')
+    } finally {
+      setPublishing(false)
     }
   }
 
@@ -485,7 +541,8 @@ export default function GenerateScenariosPage() {
                           variant="ghost"
                           onClick={() =>
                             copyToClipboard(
-                              buildJiraCommentTable(result.manualScenarios, result.scenarios),
+                              manualTemplate ||
+                                buildJiraCommentTable(result.manualScenarios, result.scenarios),
                               -2
                             )
                           }
@@ -497,6 +554,20 @@ export default function GenerateScenariosPage() {
                             <Copy className="w-4 h-4 mr-1" />
                           )}
                           {copied === -2 ? 'Copied!' : 'Copy Template'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={handlePublishToJira}
+                          disabled={publishing}
+                          className="text-amber-400 hover:text-amber-300 hover:bg-amber-500/10"
+                        >
+                          {copied === -4 ? (
+                            <Check className="w-4 h-4 mr-1" />
+                          ) : (
+                            <Sparkles className="w-4 h-4 mr-1" />
+                          )}
+                          {copied === -4 ? 'Published!' : publishing ? 'Publishing...' : 'Publish to Jira'}
                         </Button>
                         <Button
                           size="sm"
@@ -521,9 +592,30 @@ export default function GenerateScenariosPage() {
                         {saveError}
                       </div>
                     ) : null}
-                    <div className="text-sm text-slate-300 whitespace-pre-wrap font-mono leading-relaxed bg-slate-900/40 border border-slate-700/40 rounded-lg p-4">
-                      {buildJiraCommentTable(result.manualScenarios, result.scenarios)}
-                    </div>
+                    {publishError ? (
+                      <div className="mb-3 text-xs text-red-300 bg-red-500/10 border border-red-500/40 rounded-md px-3 py-2">
+                        {publishError}
+                      </div>
+                    ) : null}
+                    {publishedUrl ? (
+                      <div className="mb-3 text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-md px-3 py-2">
+                        Published to Jira. Open comment:
+                        <a
+                          href={publishedUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="ml-2 underline text-emerald-200"
+                        >
+                          View in Jira
+                        </a>
+                      </div>
+                    ) : null}
+                    <Textarea
+                      value={manualTemplate}
+                      onChange={(event) => setManualTemplate(event.target.value)}
+                      rows={14}
+                      className="text-sm text-slate-300 whitespace-pre-wrap font-mono leading-relaxed bg-slate-900/40 border border-slate-700/40 rounded-lg p-4"
+                    />
                   </CardContent>
                 </Card>
               </>
