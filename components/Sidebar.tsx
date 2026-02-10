@@ -250,7 +250,6 @@ export default function Sidebar() {
               >
                 {(['jira', 'confluence', 'github', 'database'] as const).map((key) => {
                   const status = connectionStatus[key]
-                  const isDatabase = key === 'database'
                   const label =
                     key === 'jira'
                       ? 'Jira'
