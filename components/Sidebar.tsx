@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -251,15 +251,6 @@ export default function Sidebar() {
                 {(['jira', 'confluence', 'github', 'database'] as const).map((key) => {
                   const status = connectionStatus[key]
                   const isDatabase = key === 'database'
-                  const dotColor = isDatabase
-                    ? status === 'connected'
-                      ? '#4ade80'
-                      : '#f87171'
-                    : status === 'connected'
-                    ? '#4ade80'
-                    : status === 'configured'
-                    ? '#facc15'
-                    : '#f87171'
                   const label =
                     key === 'jira'
                       ? 'Jira'
