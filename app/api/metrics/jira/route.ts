@@ -389,9 +389,16 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
     const syncedSprintsRaw = (await prisma.sprint.findMany({
       where: {
         jiraId: { notIn: IGNORED_SPRINT_JIRA_IDS },
+        status: { not: 'BACKLOG' },
       },
       include: { tickets: true },
       orderBy: { endDate: 'desc' },
+    })) as SprintWithTickets[]
+    const backlogSprints = (await prisma.sprint.findMany({
+      where: {
+        status: 'BACKLOG',
+      },
+      include: { tickets: true },
     })) as SprintWithTickets[]
     const syncedSprintsScoped = limitByTeam(syncedSprintsRaw, sprintsToSync)
     const lastSyncSprint = await prisma.sprint.findFirst({
@@ -480,77 +487,134 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
       averageClosedAgeDays: number
       oldestClosedAgeDays: number
     }> = []
+    const bugTicketsByTeam = new Map<string, Map<string, JiraTicketLite>>()
     let openBugTotal = 0
     let openBugCreatedTotal = 0
     let openBugClosedTotal = 0
     let closedBugAgeTotal = 0
     let closedBugCountTotal = 0
     let closedBugOldest = 0
+    for (const sprint of [...syncedSprintsRaw, ...backlogSprints]) {
+      const teamKey = getTeamKey(sprint.name)
+      for (const ticket of sprint.tickets || []) {
+        const type = (ticket.issueType || '').toLowerCase().trim()
+        if (type !== 'bug') continue
+        const jiraId = ticket.jiraId || `${sprint.id}-${ticket.summary || 'bug'}`
+        const teamMap = bugTicketsByTeam.get(teamKey) || new Map<string, JiraTicketLite>()
+        teamMap.set(jiraId, ticket)
+        bugTicketsByTeam.set(teamKey, teamMap)
+      }
+    }
     for (const sprint of syncedSprintsScoped) {
-      const bugsCreatedInSprint = (sprint.tickets || []).filter((ticket) => {
-        const type = (ticket.issueType || '').toLowerCase()
-        if (!type.includes('bug')) return false
+      const teamKey = getTeamKey(sprint.name)
+      const teamTicketsMap = bugTicketsByTeam.get(teamKey)
+      const teamTickets = teamTicketsMap ? Array.from(teamTicketsMap.values()) : []
+
+      const bugsCreatedInSprint = teamTickets.filter((ticket) => {
         const createdAt = parseDate(ticket.jiraCreatedAt)
         if (!createdAt) return false
         return createdAt >= sprint.startDate && createdAt <= sprint.endDate
       })
-      if (bugsCreatedInSprint.length === 0) continue
       const isActiveSprint = sprint.status === 'ACTIVE'
-      const ages = bugsCreatedInSprint.map((ticket) => {
-        const createdAt = parseDate(ticket.jiraCreatedAt)
-        if (!createdAt) return 0
-        const endPoint = isActiveSprint ? now : sprint.endDate
-        return Math.round(businessHoursBetween(createdAt, endPoint) / 8)
-      })
-      const closedInSprint = bugsCreatedInSprint.filter((ticket) => {
+      const endPoint = isActiveSprint ? now : sprint.endDate
+      const closedInSprint = teamTickets.filter((ticket) => {
         if (!isStrictClosed(ticket.status)) return false
-        const closedAt = parseDate(ticket.jiraClosedAt) || parseDate(ticket.updatedAt)
+        const closedAt = parseDate(ticket.jiraClosedAt)
         if (!closedAt) return false
-        return closedAt >= sprint.startDate && closedAt <= sprint.endDate
+        return closedAt >= sprint.startDate && closedAt <= endPoint
       })
-      const openInSprint = bugsCreatedInSprint.filter((ticket) => {
-        const closedAt = parseDate(ticket.jiraClosedAt) || parseDate(ticket.updatedAt)
+      const openInSprint = teamTickets.filter((ticket) => {
+        const createdAt = parseDate(ticket.jiraCreatedAt)
+        if (!createdAt) return false
+        if (createdAt > endPoint) return false
+        if (isStrictClosed(ticket.status)) return false
+        const closedAt = parseDate(ticket.jiraClosedAt)
         if (isActiveSprint) {
-          return !closedAt || !isStrictClosed(ticket.status)
+          return !closedAt
         }
-        return !closedAt || closedAt > sprint.endDate || !isStrictClosed(ticket.status)
+        return !closedAt || closedAt > sprint.endDate
       })
       const closedAges = closedInSprint.map((ticket) => {
         const createdAt = parseDate(ticket.jiraCreatedAt)
-        const closedAt = parseDate(ticket.jiraClosedAt) || parseDate(ticket.updatedAt)
+        const closedAt = parseDate(ticket.jiraClosedAt)
         if (!createdAt || !closedAt) return 0
         return Math.round(businessHoursBetween(createdAt, closedAt) / 8)
       })
       const totalClosedAge = closedAges.reduce((sum, value) => sum + value, 0)
       const oldestClosed = closedAges.length ? Math.max(...closedAges) : 0
-      openBugEntries.push({
-        sprintId: sprint.id,
-        sprintName: sprint.name,
-        teamKey: getTeamKey(sprint.name),
-        created: bugsCreatedInSprint.length,
-        closed: closedInSprint.length,
-        open: openInSprint.length,
-        averageClosedAgeDays:
-          closedInSprint.length
-            ? Math.round((totalClosedAge / closedInSprint.length) * 10) / 10
-            : 0,
-        oldestClosedAgeDays: oldestClosed,
-      })
-      openBugTotal += openInSprint.length
-      openBugCreatedTotal += bugsCreatedInSprint.length
-      openBugClosedTotal += closedInSprint.length
-      closedBugAgeTotal += totalClosedAge
-      closedBugCountTotal += closedInSprint.length
-      closedBugOldest = Math.max(closedBugOldest, oldestClosed)
+      if (
+        bugsCreatedInSprint.length > 0 ||
+        closedInSprint.length > 0 ||
+        openInSprint.length > 0
+      ) {
+        openBugEntries.push({
+          sprintId: sprint.id,
+          sprintName: sprint.name,
+          teamKey,
+          created: bugsCreatedInSprint.length,
+          closed: closedInSprint.length,
+          open: openInSprint.length,
+          averageClosedAgeDays:
+            closedInSprint.length
+              ? Math.round((totalClosedAge / closedInSprint.length) * 10) / 10
+              : 0,
+          oldestClosedAgeDays: oldestClosed,
+        })
+        openBugCreatedTotal += bugsCreatedInSprint.length
+        openBugClosedTotal += closedInSprint.length
+        closedBugAgeTotal += totalClosedAge
+        closedBugCountTotal += closedInSprint.length
+        closedBugOldest = Math.max(closedBugOldest, oldestClosed)
+      }
     }
+    const openBugTeams = Array.from(bugTicketsByTeam.entries()).map(
+      ([teamKey, ticketMap]) => {
+        const tickets = Array.from(ticketMap.values())
+      const openTickets = tickets.filter((ticket) => !isStrictClosed(ticket.status))
+      const closedTickets = tickets.filter((ticket) => {
+        if (!isStrictClosed(ticket.status)) return false
+        const createdAt = parseDate(ticket.jiraCreatedAt)
+        const closedAt = parseDate(ticket.jiraClosedAt)
+        return Boolean(createdAt && closedAt)
+      })
+      const closedAges = closedTickets.map((ticket) => {
+        const createdAt = parseDate(ticket.jiraCreatedAt)
+        const closedAt = parseDate(ticket.jiraClosedAt)
+        if (!createdAt || !closedAt) return 0
+        return Math.round(businessHoursBetween(createdAt, closedAt) / 8)
+      })
+      const totalClosedAge = closedAges.reduce((sum, value) => sum + value, 0)
+      const oldestClosed = closedAges.length ? Math.max(...closedAges) : 0
+        return {
+          teamKey,
+          open: openTickets.length,
+          averageClosedAgeDays:
+            closedTickets.length
+              ? Math.round((totalClosedAge / closedTickets.length) * 10) / 10
+              : 0,
+          oldestClosedAgeDays: oldestClosed,
+          closed: closedTickets.length,
+        }
+      }
+    )
+    openBugTotal = openBugTeams.reduce((sum, entry) => sum + entry.open, 0)
+    const openBugAverageClose = openBugTeams.reduce(
+      (sum, entry) => sum + entry.averageClosedAgeDays * entry.closed,
+      0
+    )
+    const openBugClosedTotalByTeam = openBugTeams.reduce((sum, entry) => sum + entry.closed, 0)
     const openBugMetrics = {
       totalOpen: openBugTotal,
       totalCreated: openBugCreatedTotal,
       totalClosed: openBugClosedTotal,
-      averageClosedAgeDays: closedBugCountTotal
-        ? Math.round((closedBugAgeTotal / closedBugCountTotal) * 10) / 10
+      averageClosedAgeDays: openBugClosedTotalByTeam
+        ? Math.round((openBugAverageClose / openBugClosedTotalByTeam) * 10) / 10
         : 0,
-      oldestClosedAgeDays: closedBugOldest,
+      oldestClosedAgeDays:
+        openBugTeams.length > 0
+          ? Math.max(...openBugTeams.map((entry) => entry.oldestClosedAgeDays))
+          : closedBugOldest,
+      byTeam: openBugTeams,
       bySprint: openBugEntries.sort(
         (a, b) => b.open - a.open || a.sprintName.localeCompare(b.sprintName)
       ),

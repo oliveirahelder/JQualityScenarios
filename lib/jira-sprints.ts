@@ -476,6 +476,44 @@ export async function getSprintIssues(
 }
 
 /**
+ * Fetch backlog issues for a board (issues not assigned to any sprint)
+ */
+export async function getBoardBacklogIssues(
+  boardId: number,
+  credentials?: JiraCredentials
+): Promise<JiraIssue[]> {
+  try {
+    const results: JiraIssue[] = []
+    let startAt = 0
+    const maxResults = 100
+    while (true) {
+      const response = await getAgileClient(credentials).get(`/board/${boardId}/issue`, {
+        params: {
+          startAt,
+          maxResults,
+          jql: 'sprint is EMPTY',
+          fields: 'summary,description,status,assignee,priority,created,issuetype',
+        },
+      })
+      const issues = response.data.issues || []
+      const total = typeof response.data.total === 'number' ? response.data.total : null
+      const pageSize =
+        typeof response.data.maxResults === 'number' ? response.data.maxResults : issues.length
+      results.push(...issues)
+      if (!issues.length) break
+      if (total != null && startAt + issues.length >= total) break
+      startAt += pageSize || issues.length
+    }
+    return results
+  } catch (error) {
+    const axiosError = error as AxiosError
+    const errorMessage = axiosError.response?.data || axiosError.message || 'Unknown error'
+    console.error(`Error fetching backlog issues for board ${boardId}:`, errorMessage)
+    throw new Error(`Failed to fetch Jira backlog issues for board ${boardId}: ${errorMessage}`)
+  }
+}
+
+/**
  * Get all boards available
  */
 export async function getAllBoards(

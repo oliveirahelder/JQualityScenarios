@@ -62,6 +62,7 @@ export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
     const sprints = await prisma.sprint.findMany({
       where: {
         jiraId: { notIn: IGNORED_SPRINT_JIRA_IDS },
+        status: { not: 'BACKLOG' },
       },
       include: {
         tickets: {

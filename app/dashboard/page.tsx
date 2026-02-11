@@ -155,6 +155,13 @@ export default function Dashboard() {
       totalClosed: 0,
       averageClosedAgeDays: 0,
       oldestClosedAgeDays: 0,
+      byTeam: [] as Array<{
+        teamKey: string
+        open: number
+        closed: number
+        averageClosedAgeDays: number
+        oldestClosedAgeDays: number
+      }>,
       bySprint: [] as Array<{
         sprintId: string
         sprintName: string
@@ -498,27 +505,34 @@ export default function Dashboard() {
     if (selectedSprint?.id && entry.sprintId !== selectedSprint.id) return false
     return true
   })
-  const openBugsTeamScoped = metricValues.openBugs.bySprint.filter((entry) => {
-    if (selectedTeamKey && entry.teamKey !== selectedTeamKey) return false
-    return true
-  })
+  const openBugTeamStats = metricValues.openBugs.byTeam || []
+  const openBugTeamStat = selectedTeamKey
+    ? openBugTeamStats.find((entry) => entry.teamKey === selectedTeamKey)
+    : null
   const openBugCreated = openBugsScoped.reduce((sum, entry) => sum + entry.created, 0)
   const openBugClosed = openBugsScoped.reduce((sum, entry) => sum + entry.closed, 0)
-  const openBugTotal = openBugsTeamScoped.reduce((sum, entry) => sum + entry.open, 0)
-  const openBugAverageClose = openBugClosed
-    ? Math.round(
-        (openBugsScoped.reduce(
-          (sum, entry) => sum + entry.averageClosedAgeDays * entry.closed,
-          0
-        ) /
-          openBugClosed) *
-          10
-      ) / 10
-    : 0
-  const openBugOldestClose = openBugsScoped.reduce(
-    (max, entry) => Math.max(max, entry.oldestClosedAgeDays),
-    0
+  const openBugTotal = openBugTeamStat?.open ?? metricValues.openBugs.totalOpen
+  const openBugAverageClose =
+    openBugTeamStat?.averageClosedAgeDays ?? metricValues.openBugs.averageClosedAgeDays
+  const openBugOldestClose =
+    openBugTeamStat?.oldestClosedAgeDays ?? metricValues.openBugs.oldestClosedAgeDays
+  const openBugTeamKey = selectedTeamKey || selectedSprint?.teamKey || null
+  const openBugSprintList = openBugTeamKey
+    ? metricValues.syncedSprints.filter((sprint) => sprint.teamKey === openBugTeamKey)
+    : metricValues.syncedSprints
+  const openBugSprintListSorted = [...openBugSprintList].sort(
+    (a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime()
   )
+  const openBugSelectedIndex = selectedSprint
+    ? openBugSprintListSorted.findIndex((sprint) => sprint.id === selectedSprint.id)
+    : -1
+  const openBugPreviousSprint =
+    openBugSelectedIndex >= 0 ? openBugSprintListSorted[openBugSelectedIndex + 1] : null
+  const openBugPreviousClosed = openBugPreviousSprint
+    ? metricValues.openBugs.bySprint.find(
+        (entry) => entry.sprintId === openBugPreviousSprint.id
+      )?.closed ?? 0
+    : 0
 
   const selectedDocStats = selectedSprint?.id ? documentationBySprint[selectedSprint.id] : null
   const docsPending = selectedDocStats
@@ -746,7 +760,7 @@ export default function Dashboard() {
       value: metricsLoading ? '--' : openBugTotal,
       subtitle: metricsLoading
         ? 'Loading bug aging'
-        : `Opened ${openBugCreated} / Closed ${openBugClosed} / ${openBugAverageClose}d avg close`,
+        : `Opened ${openBugCreated} / Closed ${openBugClosed} / ${openBugAverageClose}d avg close (team)`,
       rows: [
         {
           label: 'Opened this sprint',
@@ -755,6 +769,10 @@ export default function Dashboard() {
         {
           label: 'Closed this sprint',
           value: `${openBugClosed}`,
+        },
+        {
+          label: 'Closed prev sprint',
+          value: `${openBugPreviousClosed}`,
         },
         {
           label: 'Still open',
@@ -766,7 +784,7 @@ export default function Dashboard() {
         },
       ],
       tooltip:
-        'Bugs created in the selected sprint: opened, closed, still open (not in Done/Closed), plus average time from creation to close (closed bugs only).',
+        'Opened = bugs created within the sprint window. Closed = bugs closed within the sprint window. Still open = open bugs for the selected team. Avg close time = created to closed for the team.',
       icon: Bug,
       color: 'from-red-600 to-red-500',
       size: 'hero',
@@ -824,8 +842,9 @@ export default function Dashboard() {
         value: metricsLoading ? '--' : openBugTotal,
         subtitle: metricsLoading
           ? 'Loading bug aging'
-          : `Opened ${openBugCreated} / Closed ${openBugClosed} / ${openBugAverageClose}d avg close`,
-        tooltip: 'Open bug count, created vs closed, and average close time.',
+          : `Opened ${openBugCreated} / Closed ${openBugClosed} / Prev ${openBugPreviousClosed} / ${openBugAverageClose}d avg close (team)`,
+        tooltip:
+          'Opened this sprint vs closed this sprint, plus team-level open bug count and average close time.',
         icon: Bug,
         color: 'from-red-600 to-red-500',
         size: 'compact',

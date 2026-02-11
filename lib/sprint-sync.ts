@@ -5,6 +5,7 @@ import {
   getRecentClosedSprints,
   getSprintReport,
   getSprintIssues,
+  getBoardBacklogIssues,
   normalizeSprint,
   normalizeIssue,
   getIssueChangelogMetrics,
@@ -121,15 +122,27 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
     const jiraSprints = await getActiveSprints(credentials)
     const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
     const activeTeamKeys = new Set<string>()
+    const activeBoardIds = new Set<number>()
+    const activeBoardTeams = new Map<number, string>()
     const filteredActiveSprints = jiraSprints.filter((jiraSprint) => {
       const normalized = normalizeSprint(jiraSprint)
       if (!normalized.startDate || Number.isNaN(normalized.startDate.getTime())) {
-        activeTeamKeys.add(getTeamKey(normalized.name))
+        const teamKey = getTeamKey(normalized.name)
+        activeTeamKeys.add(teamKey)
+        if (jiraSprint.boardId) {
+          activeBoardIds.add(jiraSprint.boardId)
+          activeBoardTeams.set(jiraSprint.boardId, teamKey)
+        }
         return true
       }
       const isActiveFromCutoff = normalized.startDate >= ACTIVE_TEAM_CUTOFF
       if (isActiveFromCutoff) {
-        activeTeamKeys.add(getTeamKey(normalized.name))
+        const teamKey = getTeamKey(normalized.name)
+        activeTeamKeys.add(teamKey)
+        if (jiraSprint.boardId) {
+          activeBoardIds.add(jiraSprint.boardId)
+          activeBoardTeams.set(jiraSprint.boardId, teamKey)
+        }
       }
       return isActiveFromCutoff
     })
@@ -313,6 +326,11 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
       success: true,
       sprintCount: filteredActiveSprints.length,
       activeTeamKeys: Array.from(activeTeamKeys),
+      activeBoardIds: Array.from(activeBoardIds),
+      activeBoardTeams: Array.from(activeBoardTeams.entries()).map(([boardId, teamKey]) => ({
+        boardId,
+        teamKey,
+      })),
     }
   } catch (error) {
     console.error('[Sprint Sync] Error syncing active sprints:', error)
@@ -549,23 +567,111 @@ export async function syncAllSprints(
     const activeTeamKeys = new Set<string>(
       Array.isArray(activeSyncResult.activeTeamKeys) ? activeSyncResult.activeTeamKeys : []
     )
+    const activeBoards =
+      Array.isArray(activeSyncResult.activeBoardIds) && activeSyncResult.activeBoardIds.length > 0
+        ? activeSyncResult.activeBoardIds
+        : []
+    const activeBoardTeams = Array.isArray(activeSyncResult.activeBoardTeams)
+      ? activeSyncResult.activeBoardTeams
+      : []
     const closedSyncResult = await syncAllClosedSprints(
       credentials,
       activeTeamKeys.size > 0 ? { ...options, activeTeamKeys } : options
     )
     const cleanupResult =
       activeTeamKeys.size > 0 ? await purgeInactiveTeams(activeTeamKeys) : { prunedSprints: 0 }
+    const backlogResult = activeBoards.length
+      ? await syncBacklogIssues(activeBoards, activeBoardTeams, credentials)
+      : { syncedBoards: 0, tickets: 0 }
 
     console.log('[Sprint Sync] Full sync completed')
     return {
       activeSprints: activeSyncResult,
       closedSprints: closedSyncResult,
       cleanup: cleanupResult,
+      backlog: backlogResult,
     }
   } catch (error) {
     console.error('[Sprint Sync] Error during full sync:', error)
     throw error
   }
+}
+
+async function syncBacklogIssues(
+  boardIds: number[],
+  boardTeams: Array<{ boardId: number; teamKey: string }>,
+  credentials?: JiraCredentials
+) {
+  const storyPointsFieldId = await resolveStoryPointsFieldId(credentials)
+  const boardTeamMap = new Map(boardTeams.map((entry) => [entry.boardId, entry.teamKey]))
+  let syncedTickets = 0
+
+  for (const boardId of boardIds) {
+    if (!boardId) continue
+    const teamKey = boardTeamMap.get(boardId) || `BOARD-${boardId}`
+    const backlogSprint = await prisma.sprint.upsert({
+      where: { jiraId: `BACKLOG-${boardId}` },
+      update: {
+        name: `${teamKey} Backlog`,
+        status: 'BACKLOG',
+        startDate: new Date(0),
+        endDate: new Date(0),
+        completedAt: null,
+      },
+      create: {
+        jiraId: `BACKLOG-${boardId}`,
+        name: `${teamKey} Backlog`,
+        status: 'BACKLOG',
+        startDate: new Date(0),
+        endDate: new Date(0),
+        completedAt: null,
+      },
+    })
+
+    const backlogIssues = await getBoardBacklogIssues(boardId, credentials)
+    for (const jiraIssue of backlogIssues) {
+      const issueNormalized = normalizeIssue(jiraIssue)
+      const storyValue =
+        storyPointsFieldId && jiraIssue.fields ? jiraIssue.fields[storyPointsFieldId] : null
+      const storyPoints =
+        typeof storyValue === 'number'
+          ? storyValue
+          : storyValue != null
+          ? Number(storyValue)
+          : null
+      const jiraCreatedAt = issueNormalized.createdAt ?? null
+
+      await prisma.ticket.upsert({
+        where: { jiraId: issueNormalized.jiraId },
+        update: {
+          sprintId: backlogSprint.id,
+          summary: issueNormalized.summary,
+          description: issueNormalized.description,
+          status: issueNormalized.status,
+          assignee: issueNormalized.assignee,
+          priority: issueNormalized.priority,
+          issueType: issueNormalized.issueType || null,
+          storyPoints: storyPoints ?? null,
+          jiraCreatedAt,
+        },
+        create: {
+          sprintId: backlogSprint.id,
+          jiraId: issueNormalized.jiraId,
+          summary: issueNormalized.summary,
+          description: issueNormalized.description,
+          status: issueNormalized.status,
+          assignee: issueNormalized.assignee,
+          priority: issueNormalized.priority,
+          issueType: issueNormalized.issueType || null,
+          storyPoints: storyPoints ?? null,
+          jiraCreatedAt,
+        },
+      })
+      syncedTickets += 1
+    }
+  }
+
+  return { syncedBoards: boardIds.length, tickets: syncedTickets }
 }
 
 async function purgeInactiveTeams(activeTeamKeys: Set<string>) {
