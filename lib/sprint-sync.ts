@@ -180,6 +180,40 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
 
       // Sync issues in this sprint
       if (jiraSprint.issues) {
+        const issueKeys = jiraSprint.issues.map((issue) => issue.key).filter(Boolean)
+        const existingTickets = issueKeys.length
+          ? await prisma.ticket.findMany({
+              where: { jiraId: { in: issueKeys } },
+              select: {
+                id: true,
+                jiraId: true,
+                sprintHistory: true,
+                jiraClosedAt: true,
+                jiraCreatedAt: true,
+              },
+            })
+          : []
+        const existingByJiraId = new Map(
+          existingTickets.map((ticket) => [ticket.jiraId, ticket])
+        )
+        const existingTicketIds = existingTickets.map((ticket) => ticket.id)
+        const prCounts = existingTicketIds.length
+          ? await prisma.devInsight.groupBy({
+              by: ['ticketId'],
+              where: {
+                ticketId: { in: existingTicketIds },
+                prUrl: { not: null },
+              },
+              _count: { _all: true },
+            })
+          : []
+        const prCountByTicketId = new Map(
+          prCounts.map((entry) => [entry.ticketId, entry._count._all])
+        )
+        const grossTime = Math.ceil(
+          (new Date().getTime() - sprint.startDate.getTime()) / (1000 * 60 * 60 * 24)
+        )
+
         for (const jiraIssue of jiraSprint.issues) {
           const issueNormalized = normalizeIssue(jiraIssue)
           const { storyPoints, qaBounceBackCount: ticketBounceBacks, closedAt } =
@@ -200,22 +234,8 @@ export async function syncActiveSprints(credentials?: JiraCredentials) {
             storyPointsTotal += storyPoints
           }
           qaBounceBackCount += ticketBounceBacks
-          const grossTime = Math.ceil(
-            (new Date().getTime() - sprint.startDate.getTime()) /
-              (1000 * 60 * 60 * 24)
-          )
-          const existingTicket = await prisma.ticket.findUnique({
-            where: { jiraId: issueNormalized.jiraId },
-            select: { id: true, sprintHistory: true, jiraClosedAt: true, jiraCreatedAt: true },
-          })
-          const prCount = existingTicket
-            ? await prisma.devInsight.count({
-                where: {
-                  ticketId: existingTicket.id,
-                  prUrl: { not: null },
-                },
-              })
-            : 0
+          const existingTicket = existingByJiraId.get(issueNormalized.jiraId)
+          const prCount = existingTicket ? prCountByTicketId.get(existingTicket.id) || 0 : 0
 
           const history = parseSprintHistory(existingTicket?.sprintHistory)
           if (!history.includes(sprint.id)) {
@@ -715,6 +735,45 @@ async function syncSprintIssuesLite(
   let closedTickets = 0
   let storyPointsTotal = 0
 
+  const issueKeys = issues.map((issue) => issue.key).filter(Boolean)
+  const existingTickets = issueKeys.length
+    ? await prisma.ticket.findMany({
+        where: { jiraId: { in: issueKeys } },
+        select: {
+          id: true,
+          jiraId: true,
+          qaBounceBackCount: true,
+          sprintHistory: true,
+          jiraClosedAt: true,
+          jiraCreatedAt: true,
+          sprintId: true,
+          sprint: {
+            select: { status: true },
+          },
+        },
+      })
+    : []
+  const existingByJiraId = new Map(
+    existingTickets.map((ticket) => [ticket.jiraId, ticket])
+  )
+  const existingTicketIds = existingTickets.map((ticket) => ticket.id)
+  const prCounts = existingTicketIds.length
+    ? await prisma.devInsight.groupBy({
+        by: ['ticketId'],
+        where: {
+          ticketId: { in: existingTicketIds },
+          prUrl: { not: null },
+        },
+        _count: { _all: true },
+      })
+    : []
+  const prCountByTicketId = new Map(
+    prCounts.map((entry) => [entry.ticketId, entry._count._all])
+  )
+  const grossTime = Math.ceil(
+    (new Date().getTime() - sprintStart.getTime()) / (1000 * 60 * 60 * 24)
+  )
+
   for (const jiraIssue of issues) {
     const issueNormalized = normalizeIssue(jiraIssue)
     const storyValue =
@@ -731,31 +790,8 @@ async function syncSprintIssuesLite(
     if (typeof storyPoints === 'number' && !Number.isNaN(storyPoints)) {
       storyPointsTotal += storyPoints
     }
-    const grossTime = Math.ceil(
-      (new Date().getTime() - sprintStart.getTime()) / (1000 * 60 * 60 * 24)
-    )
-    const existingTicket = await prisma.ticket.findUnique({
-      where: { jiraId: issueNormalized.jiraId },
-      select: {
-        id: true,
-        qaBounceBackCount: true,
-        sprintHistory: true,
-        jiraClosedAt: true,
-        jiraCreatedAt: true,
-        sprintId: true,
-        sprint: {
-          select: { status: true },
-        },
-      },
-    })
-    const prCount = existingTicket
-      ? await prisma.devInsight.count({
-          where: {
-            ticketId: existingTicket.id,
-            prUrl: { not: null },
-          },
-        })
-      : 0
+    const existingTicket = existingByJiraId.get(issueNormalized.jiraId)
+    const prCount = existingTicket ? prCountByTicketId.get(existingTicket.id) || 0 : 0
 
     const history = parseSprintHistory(existingTicket?.sprintHistory)
     if (!history.includes(sprintId)) {
