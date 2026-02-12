@@ -22,6 +22,8 @@ export const GET = withAuth(async (req: NextRequest & { user?: any }) => {
       confluenceAccessClientSecretSet: Boolean(settings?.confluenceAccessClientSecret),
       githubBaseUrl: settings?.githubBaseUrl || '',
       githubOrgTokensSet: Boolean(settings?.githubOrgTokens),
+      jiraApplicationField: settings?.jiraApplicationField || '',
+      jiraTeamFilters: settings?.jiraTeamFilters || '',
       aiBaseUrl: settings?.aiBaseUrl || '',
       aiMaxTokens: settings?.aiMaxTokens ?? null,
       sprintsToSync: settings?.sprintsToSync ?? 10,
@@ -47,6 +49,8 @@ export const PUT = withAuth(
         confluenceAccessClientSecret,
         githubBaseUrl,
         githubOrgTokens,
+        jiraApplicationField,
+        jiraTeamFilters,
         aiBaseUrl,
         aiMaxTokens,
       } = await req.json()
@@ -128,6 +132,16 @@ export const PUT = withAuth(
             .filter(Boolean)
             .join('\n') || null
         : undefined
+    const normalizedJiraApplicationField =
+      typeof jiraApplicationField === 'string' && jiraApplicationField.trim()
+        ? jiraApplicationField.trim()
+        : undefined
+    const normalizedJiraTeamFilters =
+      typeof jiraTeamFilters === 'string'
+        ? jiraTeamFilters.trim()
+        : Array.isArray(jiraTeamFilters)
+          ? JSON.stringify(jiraTeamFilters)
+          : undefined
     const normalizedAiBaseUrl =
       typeof aiBaseUrl === 'string' && aiBaseUrl.trim()
         ? aiBaseUrl.trim().replace(/\/+$/, '')
@@ -161,6 +175,12 @@ export const PUT = withAuth(
         updateData.confluenceAccessClientSecret = normalizedAccessClientSecret
       if (normalizedGithubBaseUrl !== undefined) updateData.githubBaseUrl = normalizedGithubBaseUrl
       if (normalizedGithubOrgTokens !== undefined) updateData.githubOrgTokens = normalizedGithubOrgTokens
+      if (normalizedJiraApplicationField !== undefined) {
+        updateData.jiraApplicationField = normalizedJiraApplicationField
+      }
+      if (normalizedJiraTeamFilters !== undefined) {
+        updateData.jiraTeamFilters = normalizedJiraTeamFilters || null
+      }
       if (normalizedAiBaseUrl !== undefined) updateData.aiBaseUrl = normalizedAiBaseUrl
       if (normalizedAiMaxTokens !== undefined) updateData.aiMaxTokens = normalizedAiMaxTokens
       if (normalizedSprintsToSync !== undefined) updateData.sprintsToSync = normalizedSprintsToSync
@@ -177,6 +197,8 @@ export const PUT = withAuth(
           confluenceAccessClientSecret: existing.confluenceAccessClientSecret ? 'stored' : null,
           githubBaseUrl: existing.githubBaseUrl,
           githubOrgTokens: existing.githubOrgTokens ? 'stored' : null,
+          jiraApplicationField: existing.jiraApplicationField,
+          jiraTeamFilters: existing.jiraTeamFilters,
           aiBaseUrl: existing.aiBaseUrl,
           aiMaxTokens: existing.aiMaxTokens,
           sprintsToSync: existing.sprintsToSync,
@@ -199,6 +221,8 @@ export const PUT = withAuth(
           confluenceAccessClientSecret: normalizedAccessClientSecret || null,
           githubBaseUrl: normalizedGithubBaseUrl || null,
           githubOrgTokens: normalizedGithubOrgTokens || null,
+          jiraApplicationField: normalizedJiraApplicationField || null,
+          jiraTeamFilters: normalizedJiraTeamFilters || null,
           aiBaseUrl: normalizedAiBaseUrl || null,
           aiMaxTokens: normalizedAiMaxTokens ?? null,
           sprintsToSync: normalizedSprintsToSync ?? 10,

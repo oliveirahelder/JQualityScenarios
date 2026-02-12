@@ -227,7 +227,8 @@ export async function resolveStoryPointsFieldId(
   credentials?: JiraCredentials
 ): Promise<string | null> {
   const override = process.env.JIRA_STORY_POINTS_FIELD_ID
-  const cacheKey = `${credentials?.baseUrl || ''}|${credentials?.user || ''}|${override || ''}`
+  const userOverride = credentials?.sprintFieldId
+  const cacheKey = `${credentials?.baseUrl || ''}|${credentials?.user || ''}|${override || ''}|${userOverride || ''}`
   if (storyPointsFieldCache?.key === cacheKey) {
     return storyPointsFieldCache.fieldId
   }
@@ -235,6 +236,11 @@ export async function resolveStoryPointsFieldId(
   if (override) {
     storyPointsFieldCache = { key: cacheKey, fieldId: override }
     return override
+  }
+
+  if (userOverride) {
+    storyPointsFieldCache = { key: cacheKey, fieldId: userOverride }
+    return userOverride
   }
 
   try {

@@ -185,10 +185,12 @@ export async function searchJiraTickets(
               relevanceScore: calculateRelevance(issue.fields.summary, rawQuery),
               summary: issue.fields.description || issue.fields.summary,
             })
+            if (results.length >= totalLimit) break
           }
         } catch (error) {
           console.error(`Error searching Jira for term "${term}":`, error)
         }
+        if (results.length >= totalLimit) break
       }
     }
 
@@ -196,7 +198,9 @@ export async function searchJiraTickets(
     const uniqueResults = Array.from(
       new Map(results.map((r) => [r.id, r])).values()
     )
-    return uniqueResults.sort((a, b) => b.relevanceScore - a.relevanceScore)
+    return uniqueResults
+      .sort((a, b) => b.relevanceScore - a.relevanceScore)
+      .slice(0, totalLimit)
   } catch (error) {
     console.error('Error in semantic Jira search:', error)
     throw new Error('Failed to search Jira tickets')

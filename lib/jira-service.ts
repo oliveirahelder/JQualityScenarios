@@ -11,6 +11,8 @@ interface JiraDetails {
   status?: string
   assignee?: string
   comments?: string
+  components?: string[]
+  application?: string | string[] | null
   attachments?: string[]
   pullRequests?: Array<{
     url?: string | null
@@ -53,6 +55,27 @@ const extractAdfText = (node: AdfNode | string | null | undefined): string => {
   if (node.type === 'text') return node.text || ''
   if (!node.content || node.content.length === 0) return ''
 
+  const collapseWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim()
+  if (node.type === 'table') {
+    const rows = node.content || []
+    const rendered = rows
+      .map((row, rowIndex) => {
+        if (!row?.content || row.content.length === 0) return ''
+        const cells = row.content
+          .map((cell) => collapseWhitespace(extractAdfText(cell)))
+          .filter((cell) => cell.length > 0)
+        if (cells.length === 0) return ''
+        const delimiter = rowIndex === 0 ? '||' : '|'
+        return `${delimiter}${cells.join(delimiter)}${delimiter}`
+      })
+      .filter(Boolean)
+    return rendered.length > 0 ? `${rendered.join('\n')}\n` : ''
+  }
+  if (node.type === 'tableRow' || node.type === 'tableCell' || node.type === 'tableHeader') {
+    const parts = node.content.map(extractAdfText).filter(Boolean)
+    return parts.join('')
+  }
+
   const parts = node.content.map(extractAdfText).filter(Boolean)
   if (node.type === 'paragraph') return `${parts.join('')}\n`
   if (node.type === 'bulletList' || node.type === 'orderedList') return `${parts.join('\n')}\n`
@@ -62,7 +85,8 @@ const extractAdfText = (node: AdfNode | string | null | undefined): string => {
 
 export async function fetchJiraTicket(
   ticketId: string,
-  credentials?: JiraCredentials
+  credentials?: JiraCredentials,
+  options?: { applicationField?: string }
 ): Promise<JiraDetails> {
   const baseUrl = credentials?.baseUrl || process.env.JIRA_BASE_URL
   const user = credentials?.user || process.env.JIRA_USER
@@ -105,6 +129,32 @@ export async function fetchJiraTicket(
       ?.map((c: JiraComment) => extractAdfText(c.body).trim())
       .filter(Boolean)
       .join('\n')
+    const components = Array.isArray(issue.fields.components)
+      ? issue.fields.components
+          .map((component: { name?: string }) => component?.name)
+          .filter((name: string | undefined): name is string => Boolean(name))
+      : []
+
+    const normalizeCustomValue = (value: any): string | string[] | null => {
+      if (!value) return null
+      if (Array.isArray(value)) {
+        const values = value
+          .map((entry) => entry?.value ?? entry?.name ?? entry?.id ?? entry)
+          .map((entry) => (typeof entry === 'string' ? entry.trim() : String(entry)))
+          .filter(Boolean)
+        return values.length > 0 ? values : null
+      }
+      if (typeof value === 'object') {
+        const extracted = value.value ?? value.name ?? value.id
+        return extracted ? String(extracted) : null
+      }
+      return String(value)
+    }
+
+    const applicationField = options?.applicationField?.trim()
+    const application = applicationField
+      ? normalizeCustomValue(issue.fields?.[applicationField])
+      : null
 
     return {
       id: issue.key,
@@ -113,6 +163,8 @@ export async function fetchJiraTicket(
       status: issue.fields.status?.name,
       assignee: issue.fields.assignee?.displayName,
       comments: commentsText,
+      components,
+      application,
       attachments: Array.isArray(issue.fields.attachment)
         ? issue.fields.attachment
             .map((attachment: { filename?: string }) => attachment?.filename)

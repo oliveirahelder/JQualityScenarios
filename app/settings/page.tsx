@@ -39,6 +39,7 @@ interface AiSettings {
   connectionCheckedAt?: string
 }
 
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -57,7 +58,7 @@ export default function SettingsPage() {
     baseUrl: '',
     user: '',
     boardIds: '',
-    sprintFieldId: '',
+    sprintFieldId: 'customfield_10105',
     requestTimeout: 30000,
     hasToken: false,
   })
@@ -138,6 +139,7 @@ export default function SettingsPage() {
   const [adminGithubOrgTokens, setAdminGithubOrgTokens] = useState('')
   const [adminGithubOrgTokensSet, setAdminGithubOrgTokensSet] = useState(false)
   const [adminDataGithubOrgTokensMask, setAdminDataGithubOrgTokensMask] = useState('')
+  const [adminJiraApplicationField, setAdminJiraApplicationField] = useState('customfield_16521')
   const [adminAiBaseUrl, setAdminAiBaseUrl] = useState('')
   const [adminAiMaxTokens, setAdminAiMaxTokens] = useState('')
   const [adminSprintsToSync, setAdminSprintsToSync] = useState('10')
@@ -213,7 +215,10 @@ export default function SettingsPage() {
         }
 
         const jiraData = await jiraResponse.json()
-        setJiraSettings(jiraData)
+        setJiraSettings({
+          ...jiraData,
+          sprintFieldId: jiraData?.sprintFieldId || 'customfield_10105',
+        })
         if (jiraData?.connectionStatus === 'connected' && jiraData?.connectionCheckedAt) {
           const checkedAt = new Date(jiraData.connectionCheckedAt)
           const maxAgeMs = 24 * 60 * 60 * 1000
@@ -265,6 +270,8 @@ export default function SettingsPage() {
         const nextAccessClientSecretSet = Boolean(adminData?.confluenceAccessClientSecretSet)
         const nextAdminGithubBaseUrl = adminData?.githubBaseUrl || ''
         const nextAdminGithubOrgTokensSet = Boolean(adminData?.githubOrgTokensSet)
+        const nextAdminJiraApplicationField =
+          adminData?.jiraApplicationField || 'customfield_16521'
         const nextAdminAiBaseUrl = adminData?.aiBaseUrl || ''
         const nextAdminAiMaxTokens =
           typeof adminData?.aiMaxTokens === 'number'
@@ -296,6 +303,7 @@ export default function SettingsPage() {
         setAdminGithubBaseUrl(nextAdminGithubBaseUrl)
         setAdminGithubOrgTokens('')
         setAdminGithubOrgTokensSet(nextAdminGithubOrgTokensSet)
+        setAdminJiraApplicationField(nextAdminJiraApplicationField)
         setAdminAiBaseUrl(nextAdminAiBaseUrl)
         setAdminAiMaxTokens(nextAdminAiMaxTokens)
         setAdminSprintsToSync(nextAdminSprintsToSync)
@@ -766,15 +774,16 @@ export default function SettingsPage() {
           : Number.isFinite(parsedAiMaxTokens)
             ? parsedAiMaxTokens
             : undefined
-      const normalizedAccessClientId = adminConfluenceAccessClientId.trim()
-      const normalizedAccessClientSecret = adminConfluenceAccessClientSecret.trim()
-      const normalizedGithubOrgTokens = adminGithubOrgTokens
-        .split(/\r?\n+/)
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .join('\n')
-      const authToken = localStorage.getItem('token')
-      const response = await fetch('/api/admin/settings', {
+        const normalizedAccessClientId = adminConfluenceAccessClientId.trim()
+        const normalizedAccessClientSecret = adminConfluenceAccessClientSecret.trim()
+        const normalizedGithubOrgTokens = adminGithubOrgTokens
+          .split(/\r?\n+/)
+          .map((t) => t.trim())
+          .filter(Boolean)
+          .join('\n')
+        const normalizedJiraApplicationField = adminJiraApplicationField.trim()
+        const authToken = localStorage.getItem('token')
+        const response = await fetch('/api/admin/settings', {
         method: 'PUT',
         headers: {
           Authorization: `Bearer ${authToken}`,
@@ -787,13 +796,14 @@ export default function SettingsPage() {
           confluenceParentPageId: adminConfluenceParentPageId,
           confluenceSearchCql: adminConfluenceSearchCql,
           confluenceSearchLimit: normalizedConfluenceSearchLimit,
-          confluenceAccessClientId: normalizedAccessClientId || undefined,
-          confluenceAccessClientSecret: normalizedAccessClientSecret || undefined,
-          githubBaseUrl: adminGithubBaseUrl,
-          githubOrgTokens: normalizedGithubOrgTokens || undefined,
-          aiBaseUrl: adminAiBaseUrl,
-          aiMaxTokens: normalizedAiMaxTokens,
-          sprintsToSync: normalizedSprintsToSync,
+            confluenceAccessClientId: normalizedAccessClientId || undefined,
+            confluenceAccessClientSecret: normalizedAccessClientSecret || undefined,
+            githubBaseUrl: adminGithubBaseUrl,
+            githubOrgTokens: normalizedGithubOrgTokens || undefined,
+            jiraApplicationField: normalizedJiraApplicationField || undefined,
+            aiBaseUrl: adminAiBaseUrl,
+            aiMaxTokens: normalizedAiMaxTokens,
+            sprintsToSync: normalizedSprintsToSync,
         }),
       })
 
@@ -821,8 +831,8 @@ export default function SettingsPage() {
       setAdminError(err instanceof Error ? err.message : 'Failed to save admin settings')
     } finally {
       setAdminSaving(false)
+      }
     }
-  }
 
   const handleJiraSync = async () => {
     setJiraSyncing(true)
@@ -1142,14 +1152,18 @@ export default function SettingsPage() {
                             </div>
                           )}
                         </div>
-                        <Input
-                          placeholder="Sprint Field ID (customfield_XXXXX)"
-                          value={jiraSettings.sprintFieldId}
-                          onChange={(e) =>
-                            setJiraSettings({ ...jiraSettings, sprintFieldId: e.target.value })
-                          }
-                          className="bg-slate-800/50 border-slate-700"
-                        />
+                          <Input
+                            placeholder="Story Points Field ID (customfield_XXXXX)"
+                            value={jiraSettings.sprintFieldId}
+                            onChange={(e) =>
+                              setJiraSettings({ ...jiraSettings, sprintFieldId: e.target.value })
+                            }
+                            className="bg-slate-800/50 border-slate-700"
+                          />
+                          <div className="text-[11px] text-slate-500">
+                            Custom field for Story Points (ex: customfield_10020). Used to compute
+                            story points in metrics.
+                          </div>
                         <Input
                           type="password"
                           placeholder={
@@ -1501,6 +1515,19 @@ export default function SettingsPage() {
                   onChange={(e) => setAdminJiraBaseUrl(e.target.value)}
                   className="bg-slate-800/50 border-slate-700"
                 />
+                <div className="space-y-1">
+                  <Input
+                    placeholder="Jira Application field (e.g. customfield_16521)"
+                    value={adminJiraApplicationField}
+                    onChange={(e) => setAdminJiraApplicationField(e.target.value)}
+                    className="bg-slate-800/50 border-slate-700"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Custom field used to identify the team/application (default: customfield_16521).
+                    Used by Test Management to load application values. Story points field is
+                    configured per-user in Jira settings.
+                  </p>
+                </div>
                 <Input
                   placeholder="Confluence Base URL (e.g. https://confluence.jumia.com)"
                   value={adminConfluenceBaseUrl}

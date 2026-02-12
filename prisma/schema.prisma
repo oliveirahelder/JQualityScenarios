@@ -57,6 +57,7 @@ model User {
   settingsBackups SettingsBackup[]
   documentationAttachments DocumentationAttachment[]
   createdTickets JiraTicketCreation[]
+  testCases TestCase[]
 
   @@map("users")
 }
@@ -85,6 +86,8 @@ model AdminSettings {
   confluenceAccessClientSecret String?
   githubBaseUrl    String?
   githubOrgTokens  String?
+  jiraApplicationField String?
+  jiraTeamFilters  String?
   aiBaseUrl        String?
   aiMaxTokens      Int?
   sprintsToSync    Int      @default(10)
@@ -177,6 +180,7 @@ model Ticket {
   documentationDraft DocumentationDraft?
   documentationDraftLinks DocumentationDraftTicket[]
   documentationAttachments DocumentationAttachment[]
+  testCaseLinks TestCaseTicket[]
 
   @@map("tickets")
   @@index([sprintId])
@@ -330,6 +334,76 @@ model JiraTicketCreation {
   @@map("jira_ticket_creations")
   @@index([userId, createdAt])
   @@index([jiraKey])
+}
+
+model TestCase {
+  id            String   @id @default(cuid())
+  teamKey       String
+  theme         String
+  tags          String?
+  prerequisites String
+  objective     String
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  scenarios     TestCaseScenario[]
+  tickets       TestCaseTicket[]
+
+  @@map("test_cases")
+  @@index([teamKey])
+  @@index([userId])
+}
+
+model TestCaseScenario {
+  id         String   @id @default(cuid())
+  testCaseId String
+  testCase   TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  title      String
+  steps      String
+  expectedResult String?
+  notes      String?
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@map("test_case_scenarios")
+  @@index([testCaseId])
+}
+
+model TestCaseTicket {
+  id         String   @id @default(cuid())
+  testCaseId String
+  testCase   TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  ticketId   String?
+  ticket     Ticket?  @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  jiraId     String
+  summary    String?
+  createdAt  DateTime @default(now())
+
+  @@map("test_case_tickets")
+  @@index([testCaseId])
+  @@index([ticketId])
+  @@index([jiraId])
+}
+
+model TestCaseSourceTicket {
+  id            String   @id @default(cuid())
+  teamKey       String
+  jiraId        String   @unique
+  summary       String
+  description   String?
+  comments      String?
+  status        String?
+  components    String?
+  application   String?
+  scenarioCount Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("test_case_source_tickets")
+  @@index([teamKey])
+  @@index([jiraId])
 }
 
 // Deployment model - tracks CI/CD deployments to environments

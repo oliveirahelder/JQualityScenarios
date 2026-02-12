@@ -73,6 +73,7 @@ export default function DocumentationPage() {
   const [spacesLoading, setSpacesLoading] = useState(false)
   const [spacesError, setSpacesError] = useState('')
   const [historyLimit, setHistoryLimit] = useState(50)
+  const [historyLastLimit, setHistoryLastLimit] = useState<number | null>(null)
   const [historyResults, setHistoryResults] = useState<{
     jira: SearchResult[]
     confluence: SearchResult[]
@@ -256,7 +257,11 @@ export default function DocumentationPage() {
       if (historyType !== 'jira' && selectedSpaces.length === 0 && availableSpaces.length > 0) {
         throw new Error('Select at least one Confluence space to search.')
       }
-      const effectiveLimit = overrideLimit ?? historyLimit
+      const effectiveLimit =
+        typeof overrideLimit === 'number' && Number.isFinite(overrideLimit)
+          ? overrideLimit
+          : historyLimit
+      setHistoryLastLimit(effectiveLimit)
       const token = localStorage.getItem('token')
       const spacesQuery =
         selectedSpaces.length > 0
@@ -347,7 +352,7 @@ export default function DocumentationPage() {
                   </select>
                   <Button
                     size="sm"
-                    onClick={handleHistorySearch}
+                    onClick={() => handleHistorySearch()}
                     disabled={historyLoading || !historyQuery.trim()}
                   >
                     {historyLoading ? 'Searching...' : 'Search'}
@@ -442,9 +447,14 @@ export default function DocumentationPage() {
                     <Layers className="w-4 h-4 text-blue-400" />
                     Jira Tickets
                   </div>
+                  {(() => {
+                    const displayLimit = historyLastLimit ?? historyLimit
+                    return (
                   <p className="text-[11px] text-slate-500 mb-3">
-                    Showing {historyResults.jira.length} results (limit {historyLimit})
+                        Showing {historyResults.jira.length} results (limit {displayLimit})
                   </p>
+                    )
+                  })()}
                   {historyResults.jira.length === 0 ? (
                     <p className="text-xs text-slate-500">No Jira matches yet.</p>
                   ) : (
@@ -472,9 +482,14 @@ export default function DocumentationPage() {
                   <p className="text-[11px] text-slate-500 mb-3">
                     Content excerpts are pulled from matching pages.
                   </p>
-                  <p className="text-[11px] text-slate-500 mb-3">
-                    Showing {historyResults.confluence.length} results (limit {Math.min(historyLimit, 50)})
-                  </p>
+                  {(() => {
+                    const displayLimit = historyLastLimit ?? historyLimit
+                    return (
+                      <p className="text-[11px] text-slate-500 mb-3">
+                        Showing {historyResults.confluence.length} results (limit {Math.min(displayLimit, 50)})
+                      </p>
+                    )
+                  })()}
                   {historyConfluenceError ? (
                     <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/40 rounded-md px-3 py-2 mb-3">
                       {historyConfluenceError}

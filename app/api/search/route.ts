@@ -39,7 +39,15 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
     const confluenceLimitParam = searchParams.get('confluenceLimit') || searchParams.get('limit')
     const jiraLimit = jiraLimitParam ? Number(jiraLimitParam) : null
     const confluenceLimit = confluenceLimitParam ? Number(confluenceLimitParam) : null
-    const cacheKey = `${type}:${query ?? ''}`
+    const spacesParam = searchParams.get('spaces')
+    const spaceKeys = (spacesParam || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+    const hasSpacesParam = spaceKeys.length > 0
+    const cacheKey = `${type}:${query ?? ''}:jira=${jiraLimit ?? 'default'}:conf=${
+      confluenceLimit ?? 'default'
+    }:spaces=${hasSpacesParam ? spaceKeys.join('|') : 'all'}`
 
     const adminSettings = await prisma.adminSettings.findFirst()
     const jiraCredentials = buildJiraCredentialsFromUser(
@@ -62,12 +70,6 @@ export const GET = withAuth(async (request: NextRequest & { user?: any }) => {
       extractConfluenceParentPageId(adminSettings?.confluenceParentPageId || null) ||
       extractConfluenceParentPageId(adminSettings?.confluenceBaseUrl || null) ||
       null
-    const spacesParam = searchParams.get('spaces')
-    const spaceKeys = (spacesParam || '')
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean)
-    const hasSpacesParam = spaceKeys.length > 0
     const confluenceScope = {
       spaceKey: hasSpacesParam ? null : confluenceSpaceKey,
       spaceKeys: hasSpacesParam ? spaceKeys : [],
