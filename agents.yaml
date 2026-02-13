@@ -1,0 +1,946 @@
+﻿version: "1.0"
+system:
+  name: "JQuality Platform"
+  domain: "QA productivity for Jira-based teams"
+  structure:
+    - "app (Next.js pages and API routes)"
+    - "components (UI components)"
+    - "lib (integrations and core logic)"
+    - "prisma (schema and migrations)"
+    - "public (static assets)"
+  goals:
+    - "Validate ticket functionalities"
+    - "Generate structured test scenarios (manual and Gherkin)"
+    - "Create and maintain documentation drafts and updates"
+    - "Update documentation based on generated scenarios"
+    - "Improve clarity and traceability between tickets, validations, and documentation"
+  capabilities:
+    - "Scenario generation from Jira tickets with manual and Gherkin outputs"
+    - "Publish manual QA tables to Jira comments"
+    - "Documentation drafts with linked tickets and review statuses"
+    - "Regression test case builder and AI-assisted generation using history and documentation context"
+    - "Jira ticket history sync for QA source tickets and scenario hints"
+    - "PDF attachment ingestion with text extraction for context"
+    - "Historical search across Jira and Confluence"
+    - "Jira ticket creation and history tracking"
+    - "Sprint sync, delivery timing, and metrics reporting"
+    - "Integration status checks for Jira, Confluence, GitHub, AI gateway, and database"
+    - "Authentication and role-based access"
+    - "Admin settings management and sprint sync"
+    - "Integration configuration and health checks"
+    - "Database access via Prisma"
+  module_catalog:
+    - id: "app/page.tsx"
+      type: "ui_route"
+      description: "Redirects to /dashboard or /login based on auth token."
+    - id: "app/dashboard"
+      type: "ui_route"
+      description: "Dashboard metrics, sprint status, risk signals, and quick actions."
+    - id: "app/delivery-timings"
+      type: "ui_route"
+      description: "Ticket delivery timing analytics by sprint and assignee."
+    - id: "app/documentation"
+      type: "ui_route"
+      description: "Documentation drafts, review workflow, and historical search."
+    - id: "app/jira-tickets"
+      type: "ui_route"
+      description: "Create Jira tickets and view creation history."
+    - id: "app/login"
+      type: "ui_route"
+      description: "User authentication."
+    - id: "app/reports"
+      type: "ui_route"
+      description: "Sprint reporting views."
+    - id: "app/scenarios"
+      type: "ui_route"
+      description: "Generate scenarios, manage attachments, publish to Jira, save to docs."
+    - id: "app/settings"
+      type: "ui_route"
+      description: "Admin and user settings for integrations and AI gateway."
+    - id: "app/sprints"
+      type: "ui_route"
+      description: "Sprint listing and sprint-level metrics."
+    - id: "app/test-management"
+      type: "ui_route"
+      description: "Regression test case builder and QA history selection."
+    - id: "app/api/admin"
+      type: "api_route"
+      description: "Admin settings and Jira sprint sync."
+    - id: "app/api/auth"
+      type: "api_route"
+      description: "Authentication (login/register)."
+    - id: "app/api/confluence"
+      type: "api_route"
+      description: "Confluence space discovery."
+    - id: "app/api/documentation-drafts"
+      type: "api_route"
+      description: "Documentation draft CRUD and linking."
+    - id: "app/api/integrations"
+      type: "api_route"
+      description: "Integration settings and health checks."
+    - id: "app/api/jira-tickets"
+      type: "api_route"
+      description: "Create Jira tickets and store history."
+    - id: "app/api/metrics"
+      type: "api_route"
+      description: "Jira metrics and delivery timing data."
+    - id: "app/api/reports"
+      type: "api_route"
+      description: "Sprint report snapshots."
+    - id: "app/api/scenarios"
+      type: "api_route"
+      description: "Scenario generation, save, publish, and attachments."
+    - id: "app/api/search"
+      type: "api_route"
+      description: "Historical search across Jira and Confluence and Database."
+    - id: "app/api/sprints"
+      type: "api_route"
+      description: "Sprint listing and documentation stats."
+    - id: "app/api/system"
+      type: "api_route"
+      description: "System and database status checks."
+    - id: "app/api/test-case-sources"
+      type: "api_route"
+      description: "Sync Jira tickets into QA history."
+    - id: "app/api/test-cases"
+      type: "api_route"
+      description: "Regression test cases and generation."
+    - id: "components"
+      type: "core"
+      description: "Reusable UI components."
+    - id: "lib"
+      type: "core"
+      description: "Integrations and core logic."
+    - id: "prisma"
+      type: "core"
+      description: "Database schema and migrations."
+    - id: "public"
+      type: "core"
+      description: "Static assets."
+
+governance:
+  no_assumptions: true
+  change_control:
+    require_alert_on_fundamental_change: true
+    alert_channel: "user"
+  prompt_maintenance:
+    required: true
+    rule: "Revise agent strategy and prompts when necessary."
+
+data_sources:
+  - id: "jira_ticket"
+    description: "Jira ticket details from API and local ticket records."
+    entities: ["Ticket"]
+  - id: "test_scenarios"
+    description: "Manual and Gherkin scenarios plus execution records."
+    entities: ["ManualScenario", "GherkinScenario", "TestScenario"]
+  - id: "test_cases"
+    description: "Regression test cases and linked tickets."
+    entities: ["TestCase", "TestCaseScenario", "TestCaseTicket"]
+  - id: "qa_history"
+    description: "Historical Jira tickets synced for regression context."
+    entities: ["TestCaseSourceTicket"]
+  - id: "documentation"
+    description: "Documentation drafts and attachments."
+    entities: ["DocumentationDraft", "DocumentationAttachment", "DocumentationDraftTicket"]
+  - id: "dev_insights"
+    description: "PR notes and AI impact analysis."
+    entities: ["DevInsight"]
+  - id: "conversation_logs"
+    description: "Conversation logs supplied at runtime."
+    entities: ["ConversationEntry"]
+
+schemas:
+  Ticket:
+    type: "object"
+    required: ["jiraId", "summary"]
+    properties:
+      id:
+        type: "string"
+      jiraId:
+        type: "string"
+      summary:
+        type: "string"
+      description:
+        type: ["string", "null"]
+      status:
+        type: ["string", "null"]
+      assignee:
+        type: ["string", "null"]
+      priority:
+        type: ["string", "null"]
+      issueType:
+        type: ["string", "null"]
+      storyPoints:
+        type: ["number", "null"]
+      components:
+        type: "array"
+        items:
+          type: "string"
+      application:
+        anyOf:
+          - type: "string"
+          - type: "array"
+            items:
+              type: "string"
+          - type: "null"
+      comments:
+        type: ["string", "null"]
+      attachments:
+        type: "array"
+        items:
+          type: "string"
+      relatedTickets:
+        type: "array"
+        items:
+          type: "string"
+      sprintId:
+        type: ["string", "null"]
+      jiraCreatedAt:
+        type: ["string", "null"]
+        format: "date-time"
+      jiraClosedAt:
+        type: ["string", "null"]
+        format: "date-time"
+
+  TicketRef:
+    type: "object"
+    required: ["jiraId"]
+    properties:
+      id:
+        type: ["string", "null"]
+      jiraId:
+        type: "string"
+      summary:
+        type: ["string", "null"]
+
+  SprintRef:
+    type: "object"
+    required: ["name"]
+    properties:
+      id:
+        type: ["string", "null"]
+      name:
+        type: "string"
+
+  ManualScenario:
+    type: "object"
+    required: ["testScenario", "executionSteps", "expectedResult"]
+    properties:
+      id:
+        type: ["string", "null"]
+      testScenario:
+        type: "string"
+      executionSteps:
+        type: "array"
+        items:
+          type: "string"
+      expectedResult:
+        type: "string"
+      actualResult:
+        type: ["string", "null"]
+      notes:
+        type: ["string", "null"]
+
+  GherkinScenario:
+    type: "string"
+
+  TestScenario:
+    type: "object"
+    required: ["ticketId", "userId", "title", "executionStatus"]
+    properties:
+      id:
+        type: "string"
+      ticketId:
+        type: "string"
+      userId:
+        type: "string"
+      title:
+        type: "string"
+      description:
+        type: ["string", "null"]
+      given:
+        type: ["string", "null"]
+      when:
+        type: ["string", "null"]
+      then:
+        type: ["string", "null"]
+      testEnvironment:
+        type: ["string", "null"]
+      executionStatus:
+        type: "string"
+      evidence:
+        type: ["string", "null"]
+      createdAt:
+        type: "string"
+        format: "date-time"
+      updatedAt:
+        type: "string"
+        format: "date-time"
+
+  TestCaseScenario:
+    type: "object"
+    required: ["title", "steps"]
+    properties:
+      id:
+        type: ["string", "null"]
+      title:
+        type: "string"
+      steps:
+        type: "string"
+      expectedResult:
+        type: ["string", "null"]
+      notes:
+        type: ["string", "null"]
+      sortOrder:
+        type: ["number", "null"]
+
+  TestCaseTicket:
+    type: "object"
+    required: ["jiraId"]
+    properties:
+      jiraId:
+        type: "string"
+      summary:
+        type: ["string", "null"]
+
+  TestCase:
+    type: "object"
+    required: ["teamKey", "theme", "prerequisites", "objective", "scenarios"]
+    properties:
+      id:
+        type: ["string", "null"]
+      teamKey:
+        type: "string"
+      theme:
+        type: "string"
+      tags:
+        type: ["string", "null"]
+      prerequisites:
+        type: "string"
+      objective:
+        type: "string"
+      scenarios:
+        type: "array"
+        items:
+          $ref: "#/schemas/TestCaseScenario"
+      tickets:
+        type: "array"
+        items:
+          $ref: "#/schemas/TestCaseTicket"
+      createdAt:
+        type: "string"
+        format: "date-time"
+      updatedAt:
+        type: "string"
+        format: "date-time"
+
+  TestCaseSourceTicket:
+    type: "object"
+    required: ["teamKey", "jiraId", "summary"]
+    properties:
+      teamKey:
+        type: "string"
+      jiraId:
+        type: "string"
+      summary:
+        type: "string"
+      description:
+        type: ["string", "null"]
+      comments:
+        type: ["string", "null"]
+      status:
+        type: ["string", "null"]
+      components:
+        type: ["string", "null"]
+      application:
+        type: ["string", "null"]
+      scenarioCount:
+        type: ["number", "null"]
+      updatedAt:
+        type: "string"
+        format: "date-time"
+
+  DocumentationDraftTicket:
+    type: "object"
+    required: ["ticket"]
+    properties:
+      ticket:
+        $ref: "#/schemas/TicketRef"
+
+  DocumentationDraft:
+    type: "object"
+    required: ["id", "title", "status", "content"]
+    properties:
+      id:
+        type: "string"
+      title:
+        type: "string"
+      status:
+        type: "string"
+      content:
+        type: "string"
+      requirements:
+        type: ["string", "null"]
+      technicalNotes:
+        type: ["string", "null"]
+      testResults:
+        type: ["string", "null"]
+      ticket:
+        anyOf:
+          - $ref: "#/schemas/TicketRef"
+          - type: "null"
+      linkedTickets:
+        type: "array"
+        items:
+          $ref: "#/schemas/DocumentationDraftTicket"
+      sprint:
+        anyOf:
+          - $ref: "#/schemas/SprintRef"
+          - type: "null"
+      confluencePageId:
+        type: ["string", "null"]
+      confluenceUrl:
+        type: ["string", "null"]
+      createdAt:
+        type: "string"
+        format: "date-time"
+      updatedAt:
+        type: "string"
+        format: "date-time"
+
+  DocumentationAttachment:
+    type: "object"
+    required: ["id", "jiraId", "filename", "mimeType", "size"]
+    properties:
+      id:
+        type: "string"
+      jiraId:
+        type: "string"
+      filename:
+        type: "string"
+      mimeType:
+        type: "string"
+      size:
+        type: "number"
+      textContent:
+        type: ["string", "null"]
+      createdAt:
+        type: "string"
+        format: "date-time"
+
+  DevInsight:
+    type: "object"
+    required: ["ticketId"]
+    properties:
+      id:
+        type: ["string", "null"]
+      ticketId:
+        type: "string"
+      prUrl:
+        type: ["string", "null"]
+      prTitle:
+        type: ["string", "null"]
+      prNotes:
+        type: ["string", "null"]
+      prDiff:
+        type: ["string", "null"]
+      aiAnalysis:
+        type: ["string", "null"]
+      detectedImpactAreas:
+        type: ["string", "null"]
+      analyzedAt:
+        type: ["string", "null"]
+        format: "date-time"
+
+  ValidationResult:
+    type: "object"
+    required: ["scenarioRef", "executionStatus"]
+    properties:
+      scenarioRef:
+        type: "string"
+      executionStatus:
+        type: "string"
+      testEnvironment:
+        type: ["string", "null"]
+      evidence:
+        type: ["string", "null"]
+      notes:
+        type: ["string", "null"]
+
+  ConversationEntry:
+    type: "object"
+    required: ["timestamp", "author", "message"]
+    properties:
+      timestamp:
+        type: "string"
+        format: "date-time"
+      author:
+        type: "string"
+      channel:
+        type: ["string", "null"]
+      message:
+        type: "string"
+
+  ValidationScopeItem:
+    type: "object"
+    required: ["area", "scope_type"]
+    properties:
+      area:
+        type: "string"
+      scope_type:
+        type: "string"
+      scenario_refs:
+        type: "array"
+        items:
+          type: "string"
+      status:
+        type: ["string", "null"]
+      evidence_refs:
+        type: "array"
+        items:
+          type: "string"
+
+  DocumentationImpactItem:
+    type: "object"
+    required: ["action", "source_ticket_ids"]
+    properties:
+      action:
+        type: "string"
+        enum:
+          - "create_draft"
+          - "update_draft"
+          - "link_ticket"
+          - "attach_evidence"
+      draft_id:
+        type: ["string", "null"]
+      title:
+        type: ["string", "null"]
+      sections:
+        type: "array"
+        items:
+          type: "string"
+      source_ticket_ids:
+        type: "array"
+        items:
+          type: "string"
+      notes:
+        type: ["string", "null"]
+
+  SubTask:
+    type: "object"
+    required: ["id", "module", "scope", "deliverables", "validation", "source_ticket_ids"]
+    properties:
+      id:
+        type: "string"
+      module:
+        type: "string"
+      scope:
+        type: "string"
+      deliverables:
+        type: "array"
+        items:
+          type: "string"
+      validation:
+        type: "array"
+        items:
+          type: "string"
+      source_ticket_ids:
+        type: "array"
+        items:
+          type: "string"
+      related_scenarios:
+        type: "array"
+        items:
+          type: "string"
+      related_docs:
+        type: "array"
+        items:
+          type: "string"
+
+  Dependency:
+    type: "object"
+    required: ["type", "depends_on", "reason"]
+    properties:
+      type:
+        type: "string"
+      depends_on:
+        type: "array"
+        items:
+          type: "string"
+      reason:
+        type: "string"
+
+  ContextSummarizationInput:
+    type: "object"
+    required: ["ticket"]
+    properties:
+      ticket:
+        $ref: "#/schemas/Ticket"
+      acceptance_criteria:
+        type: "array"
+        items:
+          type: "string"
+      test_scenarios:
+        type: "object"
+        properties:
+          manual:
+            type: "array"
+            items:
+              $ref: "#/schemas/ManualScenario"
+          gherkin:
+            type: "array"
+            items:
+              $ref: "#/schemas/GherkinScenario"
+      test_scenario_records:
+        type: "array"
+        items:
+          $ref: "#/schemas/TestScenario"
+      test_cases:
+        type: "array"
+        items:
+          $ref: "#/schemas/TestCase"
+      qa_history_tickets:
+        type: "array"
+        items:
+          $ref: "#/schemas/TestCaseSourceTicket"
+      documentation_drafts:
+        type: "array"
+        items:
+          $ref: "#/schemas/DocumentationDraft"
+      documentation_attachments:
+        type: "array"
+        items:
+          $ref: "#/schemas/DocumentationAttachment"
+      validation_results:
+        type: "array"
+        items:
+          $ref: "#/schemas/ValidationResult"
+      dev_insights:
+        type: "array"
+        items:
+          $ref: "#/schemas/DevInsight"
+      conversation_log:
+        type: "array"
+        items:
+          $ref: "#/schemas/ConversationEntry"
+    additionalProperties: false
+
+  ContextSummarizationOutput:
+    type: "object"
+    required:
+      - "Ticket ID"
+      - "Functional Overview"
+      - "Key Acceptance Criteria"
+      - "Validation Scope"
+      - "Risks / Edge Cases"
+      - "Documentation Impact"
+    properties:
+      "Ticket ID":
+        type: "string"
+      "Functional Overview":
+        type: "string"
+      "Key Acceptance Criteria":
+        type: "array"
+        items:
+          type: "string"
+      "Validation Scope":
+        type: "array"
+        items:
+          $ref: "#/schemas/ValidationScopeItem"
+      "Risks / Edge Cases":
+        type: "array"
+        items:
+          type: "string"
+      "Documentation Impact":
+        type: "array"
+        items:
+          $ref: "#/schemas/DocumentationImpactItem"
+    additionalProperties: false
+
+  ModularizationInput:
+    type: "object"
+    required: ["ticket"]
+    properties:
+      ticket:
+        $ref: "#/schemas/Ticket"
+      acceptance_criteria:
+        type: "array"
+        items:
+          type: "string"
+      impacted_modules:
+        type: "array"
+        items:
+          type: "string"
+      components:
+        type: "array"
+        items:
+          type: "string"
+      related_tickets:
+        type: "array"
+        items:
+          type: "string"
+      dev_insights:
+        type: "array"
+        items:
+          $ref: "#/schemas/DevInsight"
+      test_scenarios:
+        type: "object"
+        properties:
+          manual:
+            type: "array"
+            items:
+              $ref: "#/schemas/ManualScenario"
+          gherkin:
+            type: "array"
+            items:
+              $ref: "#/schemas/GherkinScenario"
+      test_cases:
+        type: "array"
+        items:
+          $ref: "#/schemas/TestCase"
+      qa_history_tickets:
+        type: "array"
+        items:
+          $ref: "#/schemas/TestCaseSourceTicket"
+      documentation_drafts:
+        type: "array"
+        items:
+          $ref: "#/schemas/DocumentationDraft"
+      documentation_attachments:
+        type: "array"
+        items:
+          $ref: "#/schemas/DocumentationAttachment"
+      conversation_log:
+        type: "array"
+        items:
+          $ref: "#/schemas/ConversationEntry"
+    additionalProperties: false
+
+  ModularizationOutput:
+    type: "object"
+    required:
+      - "Parent Feature / Ticket"
+      - "Identified Modules"
+      - "Sub-task Breakdown"
+      - "Execution Order"
+      - "Documentation Updates Required"
+      - "Dependencies"
+    properties:
+      "Parent Feature / Ticket":
+        type: "string"
+      "Identified Modules":
+        type: "array"
+        items:
+          type: "string"
+      "Sub-task Breakdown":
+        type: "array"
+        items:
+          $ref: "#/schemas/SubTask"
+      "Execution Order":
+        type: "array"
+        items:
+          type: "string"
+      "Documentation Updates Required":
+        type: "array"
+        items:
+          $ref: "#/schemas/DocumentationImpactItem"
+      "Dependencies":
+        type: "array"
+        items:
+          $ref: "#/schemas/Dependency"
+    additionalProperties: false
+
+artifacts:
+  - id: "modularization_plan"
+    producer: "ModularizationAgent"
+    schema: "#/schemas/ModularizationOutput"
+  - id: "context_summary"
+    producer: "ContextSummarizationAgent"
+    schema: "#/schemas/ContextSummarizationOutput"
+
+agents:
+  - id: "ContextSummarizationAgent"
+    role: "Compress accumulated QA context into structured, traceable summaries."
+    responsibilities:
+      - "Preserve critical technical details."
+      - "Remove duplicated information."
+      - "Highlight functional changes."
+      - "Extract key validation points."
+      - "Maintain traceability to ticket IDs."
+      - "Produce structured summaries."
+    behavior:
+      tone: "professional"
+      collaboration: "build on prior artifacts and avoid rework"
+      redundancy_policy: "deduplicate across inputs and prior summaries"
+      consistency_policy: "reuse module names and ticket IDs from inputs"
+      assumption_policy: "no_assumptions"
+      change_control: "alert_before_fundamental_change"
+      scope_policy: "respect full project structure and module_catalog"
+    input_schema: "#/schemas/ContextSummarizationInput"
+    output_schema: "#/schemas/ContextSummarizationOutput"
+    output_format:
+      type: "yaml"
+      strict: true
+      field_order:
+        - "Ticket ID"
+        - "Functional Overview"
+        - "Key Acceptance Criteria"
+        - "Validation Scope"
+        - "Risks / Edge Cases"
+        - "Documentation Impact"
+    quality_checks:
+      - "Functional Overview must align with ticket summary/description."
+      - "Acceptance criteria must be extracted or left as an empty list (no placeholders)."
+      - "Validation Scope must reference scenario titles or IDs when available."
+      - "Documentation Impact must reference source ticket IDs."
+
+  - id: "ModularizationAgent"
+    role: "Break down complex work into sequenced, module-based sub-tasks."
+    responsibilities:
+      - "Identify logical modules or components."
+      - "Define clear boundaries and sub-tasks."
+      - "Prioritize execution order."
+      - "Update documentation after each completed segment."
+      - "Ensure traceability between segments and the source ticket."
+    behavior:
+      tone: "professional"
+      collaboration: "publish structured plans consumed by downstream updates"
+      redundancy_policy: "avoid overlapping scopes across sub-tasks"
+      consistency_policy: "use module_catalog identifiers"
+      assumption_policy: "no_assumptions"
+      change_control: "alert_before_fundamental_change"
+      scope_policy: "respect full project structure and module_catalog"
+    input_schema: "#/schemas/ModularizationInput"
+    output_schema: "#/schemas/ModularizationOutput"
+    output_format:
+      type: "yaml"
+      strict: true
+      field_order:
+        - "Parent Feature / Ticket"
+        - "Identified Modules"
+        - "Sub-task Breakdown"
+        - "Execution Order"
+        - "Documentation Updates Required"
+        - "Dependencies"
+    quality_checks:
+      - "Each sub-task must include source_ticket_ids."
+      - "Execution Order must reference sub-task ids in Sub-task Breakdown."
+      - "Documentation Updates Required must reference source ticket IDs."
+
+collaboration_workflow:
+  structured_output_only: true
+  shared_conventions:
+    ticket_id_field: "jiraId"
+    module_ids:
+      - "app/page.tsx"
+      - "app/dashboard"
+      - "app/delivery-timings"
+      - "app/documentation"
+      - "app/jira-tickets"
+      - "app/login"
+      - "app/reports"
+      - "app/scenarios"
+      - "app/settings"
+      - "app/sprints"
+      - "app/test-management"
+      - "app/api/admin"
+      - "app/api/auth"
+      - "app/api/confluence"
+      - "app/api/documentation-drafts"
+      - "app/api/integrations"
+      - "app/api/jira-tickets"
+      - "app/api/metrics"
+      - "app/api/reports"
+      - "app/api/scenarios"
+      - "app/api/search"
+      - "app/api/sprints"
+      - "app/api/system"
+      - "app/api/test-case-sources"
+      - "app/api/test-cases"
+      - "components"
+      - "lib"
+      - "prisma"
+      - "public"
+  handoffs:
+    - from: "ModularizationAgent"
+      to: "ContextSummarizationAgent"
+      required_fields:
+        - "Identified Modules"
+        - "Sub-task Breakdown"
+        - "Documentation Updates Required"
+      usage: "Summaries must reflect modules, sub-tasks, and doc updates without duplicating raw inputs."
+  consistency_rules:
+    - "All outputs must be audit-ready, concise, and traceable to Jira IDs."
+    - "Avoid repeating identical acceptance criteria, scenarios, or risks."
+    - "Do not introduce functionality not present in ticket or evidence."
+
+execution_order_logic:
+  complexity_assessment:
+    thresholds:
+      multi_component_min: 2
+      multi_module_min: 2
+    signals:
+      components_source: "ticket.components"
+      application_source: "ticket.application"
+      impacted_modules_source: "impacted_modules"
+      dev_insight_impacts_source: "dev_insights.detectedImpactAreas"
+    rules:
+      - id: "multi_component"
+        condition: "distinct(components + application) >= multi_component_min"
+      - id: "cross_module"
+        condition: "count(distinct(impacted_modules)) >= multi_module_min"
+    decision:
+      requires_modularization_if_any: ["multi_component", "cross_module"]
+  sequence:
+    - step: "assess_complexity"
+      output: "requires_modularization"
+    - step: "run_modularization"
+      when: "requires_modularization == true"
+      agent: "ModularizationAgent"
+      produces: "modularization_plan"
+    - step: "execute_segments"
+      description: "Run validation, scenario generation, and documentation updates per segment."
+    - step: "summarize_after_update"
+      trigger: "major_update_or_validation"
+      agent: "ContextSummarizationAgent"
+      produces: "context_summary"
+  major_update_or_validation_events:
+    - "scenario_generated"
+    - "scenario_updated"
+    - "test_case_created"
+    - "test_case_updated"
+    - "documentation_draft_created"
+    - "documentation_draft_updated"
+    - "documentation_draft_linked_ticket"
+    - "validation_result_recorded"
+
+versioning_strategy:
+  documentation:
+    format: "major.minor.patch"
+    storage:
+      location: "DocumentationDraft.content"
+      metadata_block:
+        format: "yaml_front_matter"
+        required_fields:
+          - "doc_version"
+          - "source_ticket_ids"
+          - "linked_ticket_ids"
+          - "last_updated_at"
+          - "change_summary"
+          - "validation_refs"
+        field_types:
+          doc_version: "string"
+          source_ticket_ids: "array"
+          linked_ticket_ids: "array"
+          last_updated_at: "date-time"
+          change_summary: "string"
+          validation_refs: "array"
+    increment_rules:
+      major: "Functional behavior changes or breaking requirement updates."
+      minor: "New scenarios, new documentation sections, or expanded validation scope."
+      patch: "Clarifications, formatting, or non-functional edits."
+    traceability_rules:
+      - "source_ticket_ids must include the Jira ticket that triggered the update."
+      - "linked_ticket_ids must match DocumentationDraft.linkedTickets."
+      - "change_summary must reference Jira ticket IDs."

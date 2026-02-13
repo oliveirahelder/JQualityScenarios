@@ -1,2 +1,1 @@
--- Add missing expectedResult column to test_case_scenarios
-ALTER TABLE "test_case_scenarios" ADD COLUMN "expectedResult" TEXT;
+-- No-op: column expectedResult is created in the initial test_case_scenarios table.
