@@ -115,14 +115,36 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
   }
 
   const endpoint = normalizeGatewayEndpoint(request.baseUrl as string)
+  const systemText = request.system
+  const userText = request.user
+
+  const buildMessages = (
+    format: 'string' | 'blocks',
+    mergeSystemIntoUser: boolean
+  ) => {
+    const toContent = (value: string) =>
+      format === 'blocks' ? [{ type: 'text', text: value }] : value
+
+    if (mergeSystemIntoUser) {
+      return [
+        {
+          role: 'user',
+          content: toContent([systemText, userText].filter(Boolean).join('\n\n')),
+        },
+      ]
+    }
+
+    return [
+      { role: 'system', content: toContent(systemText) },
+      { role: 'user', content: toContent(userText) },
+    ]
+  }
+
   // Gateway payload: keep it minimal (model, temperature, messages, max_tokens).
   const payloadBase: Record<string, unknown> = {
     model: request.model || DEFAULT_MODEL,
     temperature: request.temperature ?? DEFAULT_TEMPERATURE,
-    messages: [
-      { role: 'system', content: request.system },
-      { role: 'user', content: request.user },
-    ],
+    messages: buildMessages('string', false),
   }
 
   const payloadWithLimits: Record<string, unknown> = { ...payloadBase }
@@ -183,25 +205,87 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
     return content
   }
 
-  // Try once (plain). If falha por qualquer motivo, tenta sem max_tokens também.
-  try {
-    return await attemptRequest(payloadWithLimits)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    const shouldRetry =
-      message.toLowerCase().includes('unknown_parameter') ||
-      message.toLowerCase().includes('unknown parameter') ||
-      message.toLowerCase().includes('invalid request format') ||
-      message.toLowerCase().includes('failed to make http request') ||
-      message.toLowerCase().includes('provider api') ||
-      message.toLowerCase().includes('400')
-
-    if (!shouldRetry) {
-      throw error
+  const attemptWithFallbacks = async (initialPayload: Record<string, unknown>) => {
+    const payloadNoLimit = { ...payloadBase } // remove max_tokens entirely
+    const payloadBlocks = {
+      ...payloadBase,
+      messages: buildMessages('blocks', false),
+    }
+    const payloadBlocksNoLimit = {
+      ...payloadBlocks,
+    }
+    const payloadMerged = {
+      ...payloadBase,
+      messages: buildMessages('string', true),
+    }
+    const payloadMergedNoLimit = {
+      ...payloadMerged,
+    }
+    const payloadMergedBlocks = {
+      ...payloadBase,
+      messages: buildMessages('blocks', true),
+    }
+    const payloadMergedBlocksNoLimit = {
+      ...payloadMergedBlocks,
     }
 
-    const payloadNoLimit = { ...payloadBase } // remove max_tokens entirely
-    return await attemptRequest(payloadNoLimit)
+    try {
+      return await attemptRequest(initialPayload)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const lower = message.toLowerCase()
+      const shouldRetry =
+        lower.includes('unknown_parameter') ||
+        lower.includes('unknown parameter') ||
+        lower.includes('invalid request format') ||
+        lower.includes('failed to make http request') ||
+        lower.includes('provider api') ||
+        lower.includes('unexpected field type') ||
+        lower.includes('mismatch type') ||
+        lower.includes('role') ||
+        lower.includes('system') ||
+        lower.includes('400')
+
+      if (!shouldRetry) {
+        throw error
+      }
+
+      if (lower.includes('unexpected field type') || lower.includes('mismatch type')) {
+        try {
+          return await attemptRequest(payloadBlocks)
+        } catch {
+          try {
+            return await attemptRequest(payloadBlocksNoLimit)
+          } catch {
+            try {
+              return await attemptRequest(payloadMergedBlocks)
+            } catch {
+              return await attemptRequest(payloadMergedBlocksNoLimit)
+            }
+          }
+        }
+      }
+
+      if (lower.includes('role') || lower.includes('system')) {
+        try {
+          return await attemptRequest(payloadMerged)
+        } catch {
+          return await attemptRequest(payloadMergedNoLimit)
+        }
+      }
+
+      try {
+        return await attemptRequest(payloadNoLimit)
+      } catch {
+        try {
+          return await attemptRequest(payloadMerged)
+        } catch {
+          return await attemptRequest(payloadMergedBlocksNoLimit)
+        }
+      }
+    }
   }
+
+  return attemptWithFallbacks(payloadWithLimits)
 }
 

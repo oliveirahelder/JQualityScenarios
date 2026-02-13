@@ -57,6 +57,58 @@ export default function GenerateScenariosPage() {
   const [publishing, setPublishing] = useState(false)
   const [publishError, setPublishError] = useState('')
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null)
+  const [aiModel, setAiModel] = useState('')
+  const [modelOptions, setModelOptions] = useState<string[]>([
+    'gpt-5.2',
+    'gemini-2.5-pro',
+    'claude-sonnet-4.5',
+    'claude-opus-4.5',
+  ])
+  const [modelError, setModelError] = useState('')
+
+  useEffect(() => {
+    const storedModel = localStorage.getItem('aiModel.scenarios')
+    if (storedModel) {
+      setAiModel(storedModel)
+    }
+
+    const loadDefaultModel = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const response = await fetch('/api/integrations/ai', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await response.json()
+        if (response.ok && data?.model && !storedModel) {
+          setAiModel(data.model)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const loadModels = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const response = await fetch('/api/integrations/ai/models', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await response.json()
+        if (response.ok && Array.isArray(data.models) && data.models.length > 0) {
+          setModelOptions(data.models)
+        } else if (data?.error) {
+          setModelError(data.error)
+        }
+      } catch (error) {
+        setModelError(
+          error instanceof Error ? error.message : 'Failed to load AI models'
+        )
+      }
+    }
+
+    loadDefaultModel()
+    loadModels()
+  }, [])
 
   const loadAttachments = async (currentTicketId: string) => {
     setAttachmentsLoading(true)
@@ -143,6 +195,7 @@ export default function GenerateScenariosPage() {
         body: JSON.stringify({
           ticketId,
           confluence,
+          model: aiModel || undefined,
         }),
       })
 
@@ -367,6 +420,44 @@ export default function GenerateScenariosPage() {
                     <p className="text-xs text-slate-500">
                       Info: The system will fetch details from Jira API
                     </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-300">AI Model</label>
+                    {modelOptions.length > 0 ? (
+                      <select
+                        value={aiModel}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          setAiModel(value)
+                          localStorage.setItem('aiModel.scenarios', value)
+                        }}
+                        className="w-full rounded-md border border-slate-700 bg-slate-800/50 px-3 py-2 text-sm text-slate-200"
+                      >
+                        {modelOptions.map((model) => (
+                          <option key={model} value={model}>
+                            {model}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <Input
+                        placeholder="Model ID"
+                        value={aiModel}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          setAiModel(value)
+                          localStorage.setItem('aiModel.scenarios', value)
+                        }}
+                        className="bg-slate-800/50 border-slate-700"
+                      />
+                    )}
+                    <p className="text-xs text-slate-500">
+                      Default comes from Settings until you change it here.
+                    </p>
+                    {modelError && (
+                      <p className="text-xs text-amber-300">{modelError}</p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
