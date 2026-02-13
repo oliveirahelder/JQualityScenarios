@@ -13,7 +13,7 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
     const payload = req.user
 
-    const { ticketId, xmlText, confluence } = await req.json()
+    const { ticketId, xmlText, confluence, model } = await req.json()
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
@@ -178,7 +178,7 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
     // Generate scenarios using AI
     const aiConfig = {
       apiKey: user.openaiApiKey || undefined,
-      model: user.openaiModel || undefined,
+      model: model || user.openaiModel || undefined,
       baseUrl: adminSettings?.aiBaseUrl || null,
       maxTokens:
         typeof adminSettings?.aiMaxTokens === 'number' && Number.isFinite(adminSettings.aiMaxTokens)
