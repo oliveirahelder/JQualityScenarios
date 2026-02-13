@@ -49,7 +49,7 @@ type AdfNode = {
   content?: AdfNode[]
 }
 
-const extractAdfText = (node: AdfNode | string | null | undefined): string => {
+export const extractAdfText = (node: AdfNode | string | null | undefined): string => {
   if (!node) return ''
   if (typeof node === 'string') return node
   if (node.type === 'text') return node.text || ''

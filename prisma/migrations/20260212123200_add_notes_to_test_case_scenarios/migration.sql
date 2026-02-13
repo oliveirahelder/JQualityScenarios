@@ -1,2 +1,1 @@
--- Add missing notes column to test_case_scenarios
-ALTER TABLE "test_case_scenarios" ADD COLUMN "notes" TEXT;
+-- No-op: column notes is created in the initial test_case_scenarios table.

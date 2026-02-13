@@ -11,7 +11,7 @@ type AiJsonRequest = {
   strictJson?: boolean
 }
 
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'claude-sonnet-4.5'
 const DEFAULT_TEMPERATURE = 0.2
 const DEFAULT_MAX_TOKENS = 1024
 
@@ -135,14 +135,29 @@ async function generateJsonWithGateway(request: AiJsonRequest) {
   }
 
   const attemptRequest = async (payload: Record<string, unknown>) => {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(payload),
-    })
+    // Add timeout with AbortController (50 seconds to leave buffer for gateway)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 50000)
+    
+    let response: Response
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      })
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId)
+      if (fetchError.name === 'AbortError') {
+        throw new Error('AI gateway request timed out after 50 seconds')
+      }
+      throw fetchError
+    }
+    clearTimeout(timeoutId)
 
     if (!response.ok) {
       const errorText = await response.text()
