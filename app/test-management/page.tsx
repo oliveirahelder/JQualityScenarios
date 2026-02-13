@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -29,44 +29,46 @@ type ScenarioInput = {
   notes: string
 }
 
-const getTeamKey = (name: string) => {
-  const trimmed = name.trim()
-  if (!trimmed) return 'TEAM'
-  const match = trimmed.match(/^[A-Za-z0-9]+/)
-  return match ? match[0].toUpperCase() : trimmed.toUpperCase()
-}
-
 export default function TestManagementPage() {
   const [teamKeys, setTeamKeys] = useState<string[]>([])
   const [selectedTeamKey, setSelectedTeamKey] = useState('')
   const [teamLoading, setTeamLoading] = useState(false)
   const [teamError, setTeamError] = useState('')
+  const [componentOptions, setComponentOptions] = useState<string[]>([])
+  const [selectedComponent, setSelectedComponent] = useState('')
+  const [teamCounts, setTeamCounts] = useState<Record<string, number>>({})
+  const [totalSynced, setTotalSynced] = useState(0)
+  const [missingComponentCount, setMissingComponentCount] = useState(0)
+  const [missingTeamCount, setMissingTeamCount] = useState(0)
+  const [missingJiraUrl, setMissingJiraUrl] = useState<string | null>(null)
 
   const [casesLoading, setCasesLoading] = useState(false)
   const [casesError, setCasesError] = useState('')
   const [caseQuery, setCaseQuery] = useState('')
   const [sourceTickets, setSourceTickets] = useState<SourceTicket[]>([])
+  const [casesTotal, setCasesTotal] = useState(0)
+  const [casesLoaded, setCasesLoaded] = useState(0)
   const [onlyWithScenarios, setOnlyWithScenarios] = useState(false)
   const [targetTicketId, setTargetTicketId] = useState('')
   const [publishLoading, setPublishLoading] = useState(false)
   const [publishError, setPublishError] = useState('')
   const [publishSuccess, setPublishSuccess] = useState('')
+  const [saveDocsLoading, setSaveDocsLoading] = useState(false)
+  const [saveDocsError, setSaveDocsError] = useState('')
+  const [saveDocsSuccess, setSaveDocsSuccess] = useState('')
   const [contextCaseIds, setContextCaseIds] = useState<Record<string, boolean>>({})
   const [includeDocs, setIncludeDocs] = useState(true)
   const [generationLoading, setGenerationLoading] = useState(false)
   const [generationError, setGenerationError] = useState('')
   const [generationSuccess, setGenerationSuccess] = useState('')
+  const [selectedModel, setSelectedModel] = useState('')
+  const availableModels = ['claude-sonnet-4.5', 'gemini-2.5-pro', 'gpt-5.2', 'claude-opus-4.5']
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
   const [importSummary, setImportSummary] = useState('')
-  const [importComponents, setImportComponents] = useState('')
-  const [importKeyword, setImportKeyword] = useState('')
-  const [componentsLoading, setComponentsLoading] = useState(false)
-  const [componentsError, setComponentsError] = useState('')
-  const [componentsList, setComponentsList] = useState<
-    { id?: string; name: string; description?: string | null }[]
-  >([])
-  const [componentSearch, setComponentSearch] = useState('')
+  const [lastSyncLabel, setLastSyncLabel] = useState('Not synced yet')
+  const [lastSyncStatus, setLastSyncStatus] = useState<'SUCCESS' | 'FAILED' | null>(null)
+  const loadRequestRef = useRef(0)
 
   const [theme, setTheme] = useState('')
   const [tags, setTags] = useState('')
@@ -75,9 +77,6 @@ export default function TestManagementPage() {
   const [scenarios, setScenarios] = useState<ScenarioInput[]>([
     { title: '', steps: '', expectedResult: '', notes: '' },
   ])
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState('')
-  const [saveSuccess, setSaveSuccess] = useState('')
 
   useEffect(() => {
     const loadTeams = async () => {
@@ -85,7 +84,7 @@ export default function TestManagementPage() {
       setTeamError('')
       try {
         const token = localStorage.getItem('token')
-        const response = await fetch('/api/sprints', {
+        const response = await fetch('/api/test-case-sources?summary=1', {
           headers: { Authorization: `Bearer ${token}` },
         })
         if (!response.ok) {
@@ -93,14 +92,25 @@ export default function TestManagementPage() {
           throw new Error(data.error || 'Failed to load teams')
         }
         const data = await response.json()
-        const keys = new Set<string>()
-        for (const sprint of data.sprints || []) {
-          if (typeof sprint?.name === 'string') {
-            keys.add(getTeamKey(sprint.name))
+        const counts: Record<string, number> = {}
+        const teams = Array.isArray(data.teamCounts)
+          ? data.teamCounts.map((entry: { teamKey: string }) => entry.teamKey)
+          : []
+        if (Array.isArray(data.teamCounts)) {
+          for (const entry of data.teamCounts) {
+            if (entry?.teamKey) {
+              counts[entry.teamKey] = entry.count ?? 0
+            }
           }
         }
-        const sorted = Array.from(keys).sort((a, b) => a.localeCompare(b))
-        setTeamKeys(sorted)
+        setTeamKeys(teams)
+        setTeamCounts(counts)
+        setTotalSynced(
+          Object.values(counts).reduce((sum, value) => sum + value, 0)
+        )
+        setMissingComponentCount(data.missingComponentCount ?? 0)
+        setMissingTeamCount(data.missingTeamCount ?? 0)
+        setMissingJiraUrl(data.missingUrl ?? null)
       } catch (error) {
         setTeamError(error instanceof Error ? error.message : 'Failed to load teams')
       } finally {
@@ -112,40 +122,144 @@ export default function TestManagementPage() {
   }, [])
 
   useEffect(() => {
+    const loadLastSync = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const response = await fetch('/api/test-case-sources?limit=1', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await response.json()
+        if (!response.ok) return
+        if (data.lastSync?.finishedAt) {
+          const label = new Date(data.lastSync.finishedAt).toLocaleString()
+          setLastSyncLabel(
+            data.lastSync.status === 'FAILED'
+              ? `Last sync failed: ${label}`
+              : `Last sync: ${label}`
+          )
+          setLastSyncStatus(data.lastSync.status || null)
+        } else {
+          setLastSyncLabel('Not synced yet')
+          setLastSyncStatus(null)
+        }
+      } catch {
+        // leave previous label
+      }
+    }
+
+    loadLastSync()
+  }, [])
+
+  useEffect(() => {
+    const loadComponents = async () => {
+      if (!selectedTeamKey) {
+        setComponentOptions([])
+        setSelectedComponent('')
+        return
+      }
+      try {
+        const token = localStorage.getItem('token')
+        const params = new URLSearchParams()
+        params.set('filters', '1')
+        params.set('teamKey', selectedTeamKey)
+        const response = await fetch(`/api/test-case-sources?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await response.json()
+        if (!response.ok) {
+          return
+        }
+        const components = Array.isArray(data.components) ? data.components : []
+        setComponentOptions(components)
+        setSelectedComponent((current) =>
+          components.includes(current) ? current : ''
+        )
+      } catch {
+        setComponentOptions([])
+      }
+    }
+
+    loadComponents()
+  }, [selectedTeamKey])
+
+  useEffect(() => {
     if (!selectedTeamKey && teamKeys.length > 0) {
       setSelectedTeamKey(teamKeys[0])
     }
   }, [selectedTeamKey, teamKeys])
 
-  const loadCases = useCallback(async (teamKeyValue: string, queryValue: string) => {
-    if (!teamKeyValue) return
-    setCasesLoading(true)
-    setCasesError('')
-    try {
-      const token = localStorage.getItem('token')
-      const params = new URLSearchParams()
-      params.set('teamKey', teamKeyValue)
-      if (queryValue.trim()) params.set('q', queryValue.trim())
-      params.set('limit', '50')
-      const response = await fetch(`/api/test-case-sources?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to load QA history tickets')
+  const loadCases = useCallback(
+    async (teamKeyValue: string, queryValue: string, componentValue: string) => {
+      if (!teamKeyValue) return
+      setCasesLoading(true)
+      setCasesError('')
+      setCasesTotal(0)
+      setCasesLoaded(0)
+      const requestId = loadRequestRef.current + 1
+      loadRequestRef.current = requestId
+      try {
+        const token = localStorage.getItem('token')
+        const pageSize = 500
+        let offset = 0
+        let total = 0
+        let allTickets: SourceTicket[] = []
+
+        while (true) {
+          if (loadRequestRef.current !== requestId) return
+          const params = new URLSearchParams()
+          params.set('teamKey', teamKeyValue)
+          if (queryValue.trim()) params.set('q', queryValue.trim())
+          if (componentValue.trim()) params.set('component', componentValue.trim())
+          params.set('limit', String(pageSize))
+          params.set('offset', String(offset))
+          const response = await fetch(`/api/test-case-sources?${params.toString()}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          const data = await response.json()
+          if (!response.ok) {
+            throw new Error(data.error || 'Failed to load QA history tickets')
+          }
+
+          const batch: SourceTicket[] = data.tickets || []
+          total = typeof data.total === 'number' ? data.total : total
+          allTickets = [...allTickets, ...batch]
+          setSourceTickets(allTickets)
+          setCasesTotal(total)
+          setCasesLoaded(allTickets.length)
+
+          if (data.lastSync?.finishedAt) {
+            const label = new Date(data.lastSync.finishedAt).toLocaleString()
+            setLastSyncLabel(
+              data.lastSync.status === 'FAILED'
+                ? `Last sync failed: ${label}`
+                : `Last sync: ${label}`
+            )
+            setLastSyncStatus(data.lastSync.status || null)
+          } else {
+            setLastSyncLabel('Not synced yet')
+            setLastSyncStatus(null)
+          }
+
+          if (allTickets.length >= total || batch.length === 0) {
+            break
+          }
+          offset += batch.length
+        }
+      } catch (error) {
+        setCasesError(error instanceof Error ? error.message : 'Failed to load QA history tickets')
+      } finally {
+        if (loadRequestRef.current === requestId) {
+          setCasesLoading(false)
+        }
       }
-      setSourceTickets(data.tickets || [])
-    } catch (error) {
-      setCasesError(error instanceof Error ? error.message : 'Failed to load QA history tickets')
-    } finally {
-      setCasesLoading(false)
-    }
-  }, [])
+    },
+    []
+  )
 
   useEffect(() => {
     if (!selectedTeamKey) return
-    loadCases(selectedTeamKey, caseQuery)
-  }, [selectedTeamKey, caseQuery, loadCases])
+    loadCases(selectedTeamKey, caseQuery, selectedComponent)
+  }, [selectedTeamKey, caseQuery, selectedComponent, loadCases])
 
   const visibleSourceTickets = useMemo(() => {
     if (!onlyWithScenarios) return sourceTickets
@@ -172,68 +286,6 @@ export default function TestManagementPage() {
       if (current.length === 1) return current
       return current.filter((_, idx) => idx !== index)
     })
-  }
-
-  const handleCreateTestCase = async () => {
-    setSaveError('')
-    setSaveSuccess('')
-    if (!selectedTeamKey) {
-      setSaveError('Select a team before creating a test case.')
-      return
-    }
-    if (!theme.trim() || !prerequisites.trim() || !objective.trim()) {
-      setSaveError('Theme, prerequisites, and objective are mandatory.')
-      return
-    }
-    const preparedScenarios = scenarios
-      .map((scenario) => ({
-        title: scenario.title.trim(),
-        steps: scenario.steps.trim(),
-        expectedResult: scenario.expectedResult.trim(),
-        notes: scenario.notes.trim(),
-      }))
-      .filter((scenario) => scenario.title && scenario.steps)
-
-    if (preparedScenarios.length === 0) {
-      setSaveError('Add at least one scenario with title and steps.')
-      return
-    }
-
-    try {
-      setSaving(true)
-      const token = localStorage.getItem('token')
-      const response = await fetch('/api/test-cases', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          teamKey: selectedTeamKey,
-          theme,
-          tags,
-          prerequisites,
-          objective,
-          scenarios: preparedScenarios,
-        }),
-      })
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to create test case')
-      }
-      setSaveSuccess('Test case created and saved.')
-      setTheme('')
-      setTags('')
-      setPrerequisites('')
-      setObjective('')
-      setScenarios([{ title: '', steps: '', expectedResult: '', notes: '' }])
-      setExpandedCaseId(data.testCase?.id || null)
-      await loadCases(selectedTeamKey, caseQuery)
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Failed to create test case')
-    } finally {
-      setSaving(false)
-    }
   }
 
   const toggleContextCase = (testCaseId: string) => {
@@ -274,6 +326,7 @@ export default function TestManagementPage() {
           targetTicketId: targetTicketId.trim(),
           includeDocs,
           sourceJiraIds: Object.keys(contextCaseIds).filter((id) => contextCaseIds[id]),
+          model: selectedModel || undefined,
         }),
       })
       const data = await response.json()
@@ -292,7 +345,11 @@ export default function TestManagementPage() {
           }))
         )
       }
-      setGenerationSuccess('Generated test case from historical context.')
+      setGenerationSuccess(
+        data.meta?.usedCondensedContext
+          ? 'Generated with condensed context (timeout fallback).'
+          : 'Generated test case from historical context.'
+      )
     } catch (error) {
       setGenerationError(error instanceof Error ? error.message : 'Failed to generate test case')
     } finally {
@@ -365,181 +422,127 @@ export default function TestManagementPage() {
     }
   }
 
-  const handleImport = async () => {
-    if (!selectedTeamKey) {
-      setImportError('Select a team before importing.')
+  const handleSaveToDocs = async (
+    scenariosInput: Array<{
+      title: string
+      steps: string
+      expectedResult?: string | null
+      notes?: string | null
+    }>
+  ) => {
+    if (!targetTicketId.trim()) {
+      setSaveDocsError('Set the target Jira ticket ID before saving to Docs.')
       return
     }
-    const componentValues = importComponents
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean)
-    if (componentValues.length === 0) {
-      setImportError('Component is required for import.')
-      return
-    }
-    setImportError('')
-    setImportSummary('')
-    setImporting(true)
+    setSaveDocsError('')
+    setSaveDocsSuccess('')
+    setSaveDocsLoading(true)
     try {
       const token = localStorage.getItem('token')
-      const response = await fetch('/api/test-cases/import', {
+      const response = await fetch('/api/test-cases/save-docs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          teamKey: selectedTeamKey,
-          components: componentValues,
-          keyword: importKeyword.trim() || undefined,
-          requireComponent: true,
+          targetTicketId: targetTicketId.trim(),
+          theme: theme.trim() || targetTicketId.trim(),
+          prerequisites,
+          objective,
+          scenarios: scenariosInput,
         }),
       })
       const data = await response.json()
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to import test cases')
+        throw new Error(data.error || 'Failed to save to Docs')
       }
-      const skippedReasons = data.skippedReasons || {}
-      const scenarioSummary = data.scenarioSummary || {}
-      const reasonsSummary =
-        data.skipped
-          ? ` (no content: ${skippedReasons.noContent ?? 0})`
-          : ''
-      const scenarioNote =
-        typeof scenarioSummary.withScenarios === 'number' ||
-        typeof scenarioSummary.withoutScenarios === 'number'
-          ? ` Scenarios found: ${scenarioSummary.withScenarios ?? 0}, missing: ${
-              scenarioSummary.withoutScenarios ?? 0
-            }.`
-          : ''
-      setImportSummary(
-        `Imported ${data.imported ?? 0} ticket(s). Updated ${data.updated ?? 0}. Skipped ${data.skipped ?? 0}.${reasonsSummary}${scenarioNote}`
-      )
-      await loadCases(selectedTeamKey, caseQuery)
+      setSaveDocsSuccess('Saved regression pack to Docs.')
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'Failed to import test cases')
+      setSaveDocsError(error instanceof Error ? error.message : 'Failed to save to Docs')
+    } finally {
+      setSaveDocsLoading(false)
+    }
+  }
+
+  const handleImport = async () => {
+    setImportError('')
+    setImportSummary('')
+    setImporting(true)
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch('/api/test-case-sources', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to sync Jira tickets')
+      }
+      const lastSyncLabel = data.lastSyncAt
+        ? new Date(data.lastSyncAt).toLocaleString()
+        : 'n/a'
+      setImportSummary(
+        `Synced ${data.processed ?? 0} ticket(s). Inserted ${data.inserted ?? 0}. Updated ${
+          data.updated ?? 0
+        }. Teams: ${data.teamCount ?? 0}. Last sync: ${lastSyncLabel}.`
+      )
+      if (data.lastSyncAt) {
+        const label = new Date(data.lastSyncAt).toLocaleString()
+        setLastSyncLabel(`Last sync: ${label}`)
+        setLastSyncStatus('SUCCESS')
+      }
+      if (selectedTeamKey) {
+        await loadCases(selectedTeamKey, caseQuery, selectedComponent)
+      }
+      const summaryResponse = await fetch('/api/test-case-sources?summary=1', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (summaryResponse.ok) {
+        const summaryData = await summaryResponse.json()
+        const counts: Record<string, number> = {}
+        const teams = Array.isArray(summaryData.teamCounts)
+          ? summaryData.teamCounts.map((entry: { teamKey: string }) => entry.teamKey)
+          : []
+        if (Array.isArray(summaryData.teamCounts)) {
+          for (const entry of summaryData.teamCounts) {
+            if (entry?.teamKey) {
+              counts[entry.teamKey] = entry.count ?? 0
+            }
+          }
+        }
+        setTeamKeys(teams)
+        setTeamCounts(counts)
+        setTotalSynced(
+          Object.values(counts).reduce((sum, value) => sum + value, 0)
+        )
+        setMissingComponentCount(summaryData.missingComponentCount ?? 0)
+        setMissingTeamCount(summaryData.missingTeamCount ?? 0)
+        setMissingJiraUrl(summaryData.missingUrl ?? null)
+      }
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Failed to sync Jira tickets')
     } finally {
       setImporting(false)
     }
   }
 
-  const addComponentTag = (name: string) => {
-    const existing = importComponents
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean)
-    if (!existing.includes(name)) {
-      const next = [...existing, name].join(', ')
-      setImportComponents(next)
-    }
-  }
-
-  const handleLoadComponents = async () => {
-    setComponentsError('')
-    setComponentsLoading(true)
-    try {
-      const token = localStorage.getItem('token')
-      const response = await fetch('/api/integrations/jira/components?projectKey=JMIA', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to load components')
-      }
-      setComponentsList(Array.isArray(data.components) ? data.components : [])
-    } catch (error) {
-      setComponentsError(error instanceof Error ? error.message : 'Failed to load components')
-    } finally {
-      setComponentsLoading(false)
-    }
-  }
-
-  const filteredComponents = useMemo(() => {
-    const query = componentSearch.trim().toLowerCase()
-    if (!query) return componentsList
-    return componentsList.filter((component) => component.name.toLowerCase().includes(query))
-  }, [componentSearch, componentsList])
-
   return (
-    <main className="min-h-screen pb-12">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-6">
-        <div>
+    <main className="min-h-screen h-screen overflow-hidden">
+      <div className="w-full max-w-none px-4 sm:px-6 lg:px-8 2xl:px-12 py-6 h-full flex flex-col gap-4">
+        <div className="flex-none">
           <h1 className="text-3xl font-bold text-white">Test Management</h1>
           <p className="text-sm text-slate-400">
             Create reusable test cases by theme, then publish manual templates to Jira.
           </p>
         </div>
 
-        <Card className="glass-card border-slate-700/30">
-          <CardHeader>
-            <CardTitle className="text-white text-lg">Context</CardTitle>
-            <CardDescription className="text-xs text-slate-400">
-              Select the team, target ticket, and theme before building or importing.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs text-slate-400">Team</Label>
-                {teamLoading ? (
-                  <div className="text-xs text-slate-500">Loading teams...</div>
-                ) : teamKeys.length > 0 ? (
-                  <select
-                    value={selectedTeamKey}
-                    onChange={(event) => setSelectedTeamKey(event.target.value)}
-                    className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
-                  >
-                    {teamKeys.map((team) => (
-                      <option key={team} value={team}>
-                        {team}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <Input
-                    value={selectedTeamKey}
-                    onChange={(event) => setSelectedTeamKey(event.target.value)}
-                    placeholder="Team key"
-                    className="h-8 bg-slate-900/70 text-xs"
-                  />
-                )}
-                {teamError ? <span className="text-xs text-red-300">{teamError}</span> : null}
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs text-slate-400">Target Jira ticket</Label>
-                <Input
-                  value={targetTicketId}
-                  onChange={(event) => setTargetTicketId(event.target.value)}
-                  placeholder="JMIA-1234"
-                  className="h-8 bg-slate-900/70 text-xs"
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label className="text-xs text-slate-400">Theme</Label>
-                <Input
-                  value={theme}
-                  onChange={(event) => setTheme(event.target.value)}
-                  placeholder="e.g. Mandalorian bonus"
-                  className="h-8 bg-slate-900/70 text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs text-slate-400">Tags (comma separated)</Label>
-              <Input
-                value={tags}
-                onChange={(event) => setTags(event.target.value)}
-                placeholder="bonus, payout, validation"
-                className="h-8 bg-slate-900/70 text-xs"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
-          <div className="space-y-4">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] flex-1 min-h-0">
+          <div className="space-y-4 min-h-0 overflow-y-auto pr-1">
 
             <Card className="glass-card border-slate-700/30">
               <CardHeader>
@@ -627,17 +630,6 @@ export default function TestManagementPage() {
                   ))}
                 </div>
 
-                {saveError ? <div className="text-xs text-red-300">{saveError}</div> : null}
-                {saveSuccess ? <div className="text-xs text-emerald-300">{saveSuccess}</div> : null}
-
-                <Button
-                  onClick={handleCreateTestCase}
-                  disabled={saving}
-                  className="w-full justify-center"
-                >
-                  {saving ? 'Saving...' : 'Save test case'}
-                </Button>
-
 
                 <div className="mt-4 space-y-2">
                   <div className="text-xs text-slate-400">Publish regression comment</div>
@@ -666,45 +658,142 @@ export default function TestManagementPage() {
                   >
                     {publishLoading ? 'Publishing...' : 'Publish manual template'}
                   </Button>
+
+                  <div className="pt-2">
+                    {saveDocsError ? (
+                      <div className="text-xs text-red-300">{saveDocsError}</div>
+                    ) : null}
+                    {saveDocsSuccess ? (
+                      <div className="text-xs text-emerald-300">{saveDocsSuccess}</div>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 px-3 text-xs w-full"
+                      disabled={saveDocsLoading || !targetTicketId.trim()}
+                      onClick={() =>
+                        handleSaveToDocs(
+                          scenarios.map((scenario) => ({
+                            title: scenario.title,
+                            steps: scenario.steps,
+                            expectedResult: scenario.expectedResult,
+                            notes: scenario.notes,
+                          }))
+                        )
+                      }
+                    >
+                      {saveDocsLoading ? 'Saving...' : 'Save regression pack to Docs'}
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="mt-4 space-y-2 rounded-lg border border-slate-800/60 bg-slate-900/50 p-3">
-                  <div className="flex items-center justify-between text-xs text-slate-400">
-                    <span>Regression pack generator</span>
-                    <label className="flex items-center gap-2 text-[11px] text-slate-400">
-                      <input
-                        type="checkbox"
-                        className="h-3 w-3 rounded border-slate-600"
-                        checked={includeDocs}
-                        onChange={(event) => setIncludeDocs(event.target.checked)}
+              </CardContent>
+            </Card>
+
+            {(missingComponentCount > 0 || missingTeamCount > 0) && (
+              <Card className="glass-card border-amber-500/30">
+                <CardHeader>
+                  <CardTitle className="text-sm text-amber-200">
+                    Missing classification
+                  </CardTitle>
+                  <CardDescription className="text-xs text-slate-400">
+                    Tickets without component or team identification.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="text-xs text-slate-300 space-y-2">
+                  <div>Missing component: {missingComponentCount}</div>
+                  <div>Missing team (component + application empty): {missingTeamCount}</div>
+                  {missingJiraUrl ? (
+                    <a
+                      href={missingJiraUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-amber-300 hover:text-amber-200 underline"
+                    >
+                      See list in Jira
+                    </a>
+                  ) : (
+                    <div className="text-[11px] text-slate-500">
+                      Configure Jira base URL to open the list in Jira.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          <div className="space-y-4 min-h-0 overflow-y-auto pr-1">
+            <Card className="glass-card border-slate-700/30">
+              <CardHeader>
+                <CardTitle className="text-white text-lg">Context</CardTitle>
+                <CardDescription className="text-xs text-slate-400">
+                  Select the team, target ticket, and theme before building or importing.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid gap-3">
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs text-slate-400">Team</Label>
+                    {teamLoading ? (
+                      <div className="text-xs text-slate-500">Loading teams...</div>
+                    ) : teamKeys.length > 0 ? (
+                      <select
+                        value={selectedTeamKey}
+                        onChange={(event) => setSelectedTeamKey(event.target.value)}
+                        className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+                      >
+                    {teamKeys.map((team) => (
+                      <option key={team} value={team}>
+                        {team} {teamCounts[team] ? `(${teamCounts[team]})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                      <Input
+                        value={selectedTeamKey}
+                        onChange={(event) => setSelectedTeamKey(event.target.value)}
+                        placeholder="Team key"
+                        className="h-8 bg-slate-900/70 text-xs"
                       />
-                      Include docs
-                    </label>
+                    )}
+                    {teamError ? <span className="text-xs text-red-300">{teamError}</span> : null}
+                    {totalSynced > 0 ? (
+                      <span className="text-[11px] text-slate-500">
+                        Total synced tickets: {totalSynced}
+                      </span>
+                    ) : null}
                   </div>
-                  <div className="text-[11px] text-slate-500">
-                    Selected source tickets: {Object.values(contextCaseIds).filter(Boolean).length}
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs text-slate-400">Target Jira ticket</Label>
+                    <Input
+                      value={targetTicketId}
+                      onChange={(event) => setTargetTicketId(event.target.value)}
+                      placeholder="JMIA-1234"
+                      className="h-8 bg-slate-900/70 text-xs"
+                    />
                   </div>
-                  {generationError ? (
-                    <div className="text-xs text-red-300">{generationError}</div>
-                  ) : null}
-                  {generationSuccess ? (
-                    <div className="text-xs text-emerald-300">{generationSuccess}</div>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="h-8 px-3 text-xs"
-                    disabled={generationLoading}
-                    onClick={handleGenerateFromHistory}
-                  >
-                    {generationLoading ? 'Generating...' : 'Generate regression pack'}
-                  </Button>
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-xs text-slate-400">Theme</Label>
+                    <Input
+                      value={theme}
+                      onChange={(event) => setTheme(event.target.value)}
+                      placeholder="e.g. Mandalorian bonus"
+                      className="h-8 bg-slate-900/70 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs text-slate-400">Tags (comma separated)</Label>
+                  <Input
+                    value={tags}
+                    onChange={(event) => setTags(event.target.value)}
+                    placeholder="bonus, payout, validation"
+                    className="h-8 bg-slate-900/70 text-xs"
+                  />
                 </div>
               </CardContent>
             </Card>
-          </div>
-
-          <div className="space-y-4">
 
             <Card className="glass-card border-slate-700/30">
               <CardHeader>
@@ -712,26 +801,36 @@ export default function TestManagementPage() {
                   <div>
                     <CardTitle className="text-white text-lg flex items-center gap-2">
                       <CheckCircle2 className="w-4 h-4 text-blue-300" />
-                      QA history (completed tickets)
+                      QA history (synced Jira tickets)
                     </CardTitle>
                     <CardDescription className="text-xs text-slate-400">
-                      Import completed tickets to build QA history for this team.
+                      Sync all Jira tickets to build QA history for this team.
                     </CardDescription>
+                    <div
+                      className={`text-[11px] ${
+                        lastSyncStatus === 'FAILED' ? 'text-red-300' : 'text-slate-500'
+                      }`}
+                    >
+                      {lastSyncLabel}
+                    </div>
+                    {importing ? (
+                      <div className="text-[11px] text-amber-300">Sync in progress...</div>
+                    ) : null}
                   </div>
                   <Button
                     variant="secondary"
                     className="h-7 px-2 text-xs"
                     onClick={handleImport}
-                    disabled={importing || !selectedTeamKey}
+                    disabled={importing}
                   >
-                    {importing ? 'Importing...' : 'Import from Jira'}
+                    {importing ? 'Syncing...' : 'Sync tickets'}
                   </Button>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 {!selectedTeamKey ? (
                   <div className="text-xs text-amber-300">
-                    Select a team to enable the import.
+                    Select a team to view synced tickets.
                   </div>
                 ) : null}
                 {importError ? (
@@ -740,79 +839,33 @@ export default function TestManagementPage() {
                 {importSummary ? (
                   <div className="text-xs text-emerald-300">{importSummary}</div>
                 ) : null}
-                <div className="rounded-lg border border-slate-800/60 bg-slate-900/40 p-3 space-y-2">
-                  <div className="text-[11px] text-slate-400 font-semibold">
-                    Jira import filters (per QA run)
-                  </div>
-                  <Input
-                    value={importComponents}
-                    onChange={(event) => setImportComponents(event.target.value)}
-                    placeholder="Components (comma separated)"
-                    className="h-8 bg-slate-900/70 text-xs"
-                  />
-                  <div className="grid gap-2 md:grid-cols-2">
-                    <Input
-                      value={importKeyword}
-                      onChange={(event) => setImportKeyword(event.target.value)}
-                      placeholder='Keyword (optional, e.g. "mandalorian")'
-                      className="h-8 bg-slate-900/70 text-xs"
-                    />
-                    <div className="flex items-center rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200">
-                      Final status only (Done / Closed)
-                    </div>
-                  </div>
-                  <div className="text-[11px] text-slate-400">
-                    Component is required (component is not EMPTY).
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-7 px-2 text-xs border-slate-700 text-slate-300"
-                      onClick={handleLoadComponents}
-                      disabled={componentsLoading}
-                    >
-                      {componentsLoading ? 'Loading...' : 'Load components'}
-                    </Button>
-                    <Input
-                      value={componentSearch}
-                      onChange={(event) => setComponentSearch(event.target.value)}
-                      placeholder="Filter components"
-                      className="h-7 w-40 bg-slate-900/70 text-xs"
-                    />
-                    {componentsError ? (
-                      <span className="text-[11px] text-red-300">{componentsError}</span>
-                    ) : null}
-                  </div>
-                  {componentsList.length > 0 ? (
-                    <div className="max-h-[140px] overflow-y-auto rounded-md border border-slate-800/60 bg-slate-950/40 p-2">
-                      <div className="flex flex-wrap gap-2">
-                        {filteredComponents.map((component) => (
-                          <button
-                            key={component.id || component.name}
-                            type="button"
-                            onClick={() => addComponentTag(component.name)}
-                            className="rounded-full border border-slate-700 px-2 py-1 text-[10px] text-slate-300 hover:border-blue-400 hover:text-white transition"
-                            title={component.description || component.name}
-                          >
-                            {component.name}
-                          </button>
-                        ))}
-                        {filteredComponents.length === 0 ? (
-                          <span className="text-[11px] text-slate-500">
-                            No components match the filter.
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
                 <Input
                   value={caseQuery}
                   onChange={(event) => setCaseQuery(event.target.value)}
                   placeholder="Search by keyword (summary, comments, components)"
                   className="h-8 bg-slate-900/70 text-xs"
                 />
+                <div className="flex flex-col gap-1">
+                  <Label className="text-xs text-slate-400">Component</Label>
+                  {componentOptions.length > 0 ? (
+                    <select
+                      value={selectedComponent}
+                      onChange={(event) => setSelectedComponent(event.target.value)}
+                      className="rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-200"
+                    >
+                      <option value="">All components</option>
+                      {componentOptions.map((component) => (
+                        <option key={component} value={component}>
+                          {component}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="text-[11px] text-slate-500">
+                      No components available for this team.
+                    </div>
+                  )}
+                </div>
                 <label className="flex items-center gap-2 text-[11px] text-slate-400">
                   <input
                     type="checkbox"
@@ -824,12 +877,14 @@ export default function TestManagementPage() {
                 </label>
 
                 {casesLoading ? (
-                  <div className="text-xs text-slate-500">Loading QA history...</div>
+                  <div className="text-xs text-slate-500">
+                    Loading QA history... {casesLoaded}/{casesTotal || '?'}
+                  </div>
                 ) : casesError ? (
                   <div className="text-xs text-red-300">{casesError}</div>
                 ) : visibleSourceTickets.length === 0 ? (
                   <div className="text-xs text-slate-500">
-                    No QA history found yet. Import from Jira to start.
+                    No QA history found yet. Sync tickets to start.
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
@@ -871,6 +926,54 @@ export default function TestManagementPage() {
                 )}
               </CardContent>
             </Card>
+
+            <div className="space-y-2 rounded-lg border border-slate-700/40 bg-slate-900/50 p-3">
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>Regression pack generator</span>
+                <label className="flex items-center gap-2 text-[11px] text-slate-400">
+                  <input
+                    type="checkbox"
+                    className="h-3 w-3 rounded border-slate-600"
+                    checked={includeDocs}
+                    onChange={(event) => setIncludeDocs(event.target.checked)}
+                  />
+                  Include docs
+                </label>
+              </div>
+              <div className="text-[11px] text-slate-500">
+                Selected tickets: {Object.values(contextCaseIds).filter(Boolean).length}
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] text-slate-400">Model:</label>
+                <select
+                  value={selectedModel}
+                  onChange={(event) => setSelectedModel(event.target.value)}
+                  className="rounded border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-200 flex-1"
+                >
+                  <option value="">Default (claude-sonnet-4.5)</option>
+                  {availableModels.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {generationError ? (
+                <div className="text-xs text-red-300">{generationError}</div>
+              ) : null}
+              {generationSuccess ? (
+                <div className="text-xs text-emerald-300">{generationSuccess}</div>
+              ) : null}
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-8 px-3 text-xs w-full"
+                disabled={generationLoading}
+                onClick={handleGenerateFromHistory}
+              >
+                {generationLoading ? 'Generating...' : 'Generate regression pack'}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
