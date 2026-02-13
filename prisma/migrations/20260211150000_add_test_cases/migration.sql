@@ -10,7 +10,8 @@ CREATE TABLE "test_cases" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "test_cases_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "test_cases_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "test_cases_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -24,7 +25,8 @@ CREATE TABLE "test_case_scenarios" (
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "test_case_scenarios_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "test_case_scenarios_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "test_case_scenarios_testCaseId_fkey" FOREIGN KEY ("testCaseId") REFERENCES "test_cases"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -36,7 +38,9 @@ CREATE TABLE "test_case_tickets" (
     "summary" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "test_case_tickets_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "test_case_tickets_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "test_case_tickets_testCaseId_fkey" FOREIGN KEY ("testCaseId") REFERENCES "test_cases"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "test_case_tickets_ticketId_fkey" FOREIGN KEY ("ticketId") REFERENCES "tickets"("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateIndex
@@ -57,14 +61,4 @@ CREATE INDEX "test_case_tickets_ticketId_idx" ON "test_case_tickets"("ticketId")
 -- CreateIndex
 CREATE INDEX "test_case_tickets_jiraId_idx" ON "test_case_tickets"("jiraId");
 
--- AddForeignKey
-ALTER TABLE "test_cases" ADD CONSTRAINT "test_cases_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "test_case_scenarios" ADD CONSTRAINT "test_case_scenarios_testCaseId_fkey" FOREIGN KEY ("testCaseId") REFERENCES "test_cases"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "test_case_tickets" ADD CONSTRAINT "test_case_tickets_testCaseId_fkey" FOREIGN KEY ("testCaseId") REFERENCES "test_cases"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "test_case_tickets" ADD CONSTRAINT "test_case_tickets_ticketId_fkey" FOREIGN KEY ("ticketId") REFERENCES "tickets"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+-- Foreign keys added inline for SQLite compatibility

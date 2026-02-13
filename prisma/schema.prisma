@@ -394,9 +394,12 @@ model TestCaseSourceTicket {
   summary       String
   description   String?
   comments      String?
+  acceptanceCriteria String?
   status        String?
   components    String?
   application   String?
+  attachments  String?
+  attachmentsText String?
   scenarioCount Int      @default(0)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -404,6 +407,21 @@ model TestCaseSourceTicket {
   @@map("test_case_source_tickets")
   @@index([teamKey])
   @@index([jiraId])
+}
+
+model JiraTicketSyncLog {
+  id             String   @id @default(cuid())
+  status         String
+  processedCount Int
+  insertedCount  Int
+  updatedCount   Int
+  teamKeys       String?
+  teamCount      Int      @default(0)
+  startedAt      DateTime @default(now())
+  finishedAt     DateTime?
+  error          String?
+
+  @@map("jira_ticket_sync_logs")
 }
 
 // Deployment model - tracks CI/CD deployments to environments
