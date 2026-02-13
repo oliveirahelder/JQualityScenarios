@@ -61,8 +61,14 @@ export default function TestManagementPage() {
   const [generationLoading, setGenerationLoading] = useState(false)
   const [generationError, setGenerationError] = useState('')
   const [generationSuccess, setGenerationSuccess] = useState('')
-  const [selectedModel, setSelectedModel] = useState('')
-  const availableModels = ['claude-sonnet-4.5', 'gemini-2.5-pro', 'gpt-5.2', 'claude-opus-4.5']
+  const [aiModel, setAiModel] = useState('')
+  const [modelOptions, setModelOptions] = useState<string[]>([
+    'gpt-5.2',
+    'gemini-2.5-pro',
+    'claude-sonnet-4.5',
+    'claude-opus-4.5',
+  ])
+  const [modelError, setModelError] = useState('')
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
   const [importSummary, setImportSummary] = useState('')
@@ -119,6 +125,50 @@ export default function TestManagementPage() {
     }
 
     loadTeams()
+  }, [])
+
+  useEffect(() => {
+    const storedModel = localStorage.getItem('aiModel.testManagement')
+    if (storedModel) {
+      setAiModel(storedModel)
+    }
+
+    const loadDefaultModel = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const response = await fetch('/api/integrations/ai', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await response.json()
+        if (response.ok && data?.model && !storedModel) {
+          setAiModel(data.model)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const loadModels = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        const response = await fetch('/api/integrations/ai/models', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await response.json()
+        if (response.ok && Array.isArray(data.models) && data.models.length > 0) {
+          setModelOptions(data.models)
+        } else if (data?.error) {
+          setModelError(data.error)
+        }
+      } catch (error) {
+        setModelError(
+          error instanceof Error ? error.message : 'Failed to load AI models'
+        )
+      }
+    }
+
+    loadDefaultModel()
+    loadModels()
   }, [])
 
   useEffect(() => {
@@ -326,7 +376,7 @@ export default function TestManagementPage() {
           targetTicketId: targetTicketId.trim(),
           includeDocs,
           sourceJiraIds: Object.keys(contextCaseIds).filter((id) => contextCaseIds[id]),
-          model: selectedModel || undefined,
+          model: aiModel || undefined,
         }),
       })
       const data = await response.json()
@@ -945,19 +995,41 @@ export default function TestManagementPage() {
               </div>
               <div className="flex items-center gap-2">
                 <label className="text-[11px] text-slate-400">Model:</label>
-                <select
-                  value={selectedModel}
-                  onChange={(event) => setSelectedModel(event.target.value)}
-                  className="rounded border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-200 flex-1"
-                >
-                  <option value="">Default (claude-sonnet-4.5)</option>
-                  {availableModels.map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
+                {modelOptions.length > 0 ? (
+                  <select
+                    value={aiModel}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      setAiModel(value)
+                      localStorage.setItem('aiModel.testManagement', value)
+                    }}
+                    className="rounded border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-200 flex-1"
+                  >
+                    {modelOptions.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input
+                    value={aiModel}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      setAiModel(value)
+                      localStorage.setItem('aiModel.testManagement', value)
+                    }}
+                    placeholder="Model ID"
+                    className="h-7 bg-slate-900/70 text-[11px]"
+                  />
+                )}
               </div>
+              <div className="text-[10px] text-slate-500">
+                Default from Settings until you change it here.
+              </div>
+              {modelError ? (
+                <div className="text-[10px] text-amber-300">{modelError}</div>
+              ) : null}
               {generationError ? (
                 <div className="text-xs text-red-300">{generationError}</div>
               ) : null}
