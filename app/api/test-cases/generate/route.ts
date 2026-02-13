@@ -110,7 +110,7 @@ const repairJsonString = (raw: string) => {
 export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
   try {
     const payload = req.user
-    const { teamKey, theme, targetTicketId, includeDocs, caseIds, sourceJiraIds } = await req.json()
+    const { teamKey, theme, targetTicketId, includeDocs, caseIds, sourceJiraIds, model } = await req.json()
 
     if (!teamKey || !theme || !targetTicketId) {
       return NextResponse.json(
@@ -192,29 +192,49 @@ export const POST = withAuth(async (req: NextRequest & { user?: any }) => {
         })
       : []
 
-    const sourceContext = sourceTickets.length
-      ? sourceTickets
-          .map((ticket) => {
-            const description = ticket.description?.trim()
-            const comments = ticket.comments?.trim()
-            return `Ticket ${ticket.jiraId}: ${ticket.summary}
+    const clipText = (value: string, maxChars: number) =>
+      value.length > maxChars ? `${value.slice(0, maxChars)}...` : value
+
+    // Ultra-condensed version for second retry
+    const clipTextMini = (value: string, maxChars: number) =>
+      value.length > maxChars ? `${value.slice(0, Math.floor(maxChars / 3))}...` : value
+
+    const buildSourceContext = (trim: boolean) => {
+      if (sourceTickets.length === 0) return ''
+      return sourceTickets
+        .map((ticket) => {
+          const description = ticket.description?.trim() || 'None'
+          const comments = ticket.comments?.trim() || 'None'
+          const acceptanceCriteria = ticket.acceptanceCriteria?.trim() || 'None'
+          const attachmentsText = ticket.attachmentsText?.trim() || 'None'
+          const descriptionValue = trim ? clipText(description, 1200) : description
+          const commentsValue = trim ? clipText(comments, 1200) : comments
+          const acceptanceValue = trim ? clipText(acceptanceCriteria, 600) : acceptanceCriteria
+          const attachmentsValue = trim ? clipText(attachmentsText, 800) : attachmentsText
+          return `Ticket ${ticket.jiraId}: ${ticket.summary}
 Status: ${ticket.status || 'Unknown'}
 Components: ${ticket.components || 'None'}
 Application: ${ticket.application || 'None'}
-Description: ${description || 'None'}
-Comments: ${comments || 'None'}`
-          })
-          .join('\n\n')
-      : ''
+Acceptance criteria: ${acceptanceValue}
+Attachments context: ${attachmentsValue}
+Description: ${descriptionValue}
+Comments: ${commentsValue}`
+        })
+        .join('\n\n')
+    }
 
-    const docsContext = docs.length
-      ? docs
-          .map((draft) => {
-            const content = draft.content.length > 800 ? `${draft.content.slice(0, 800)}...` : draft.content
-            return `Doc: ${draft.title}\n${content}`
-          })
-          .join('\n\n')
-      : ''
+    const buildDocsContext = (trim: boolean) => {
+      if (docs.length === 0) return ''
+      return docs
+        .map((draft) => {
+          const content = trim ? clipText(draft.content, 1200) : draft.content
+          return `Doc: ${draft.title}\n${content}`
+        })
+        .join('\n\n')
+    }
+
+    const sourceContext = buildSourceContext(false)
+    const docsContext = buildDocsContext(false)
 
     const systemPrompt = `You are a senior QA analyst.
 Build a reusable test case based on the target ticket plus historical test cases and documentation.
@@ -234,27 +254,33 @@ Return ONLY valid JSON with this shape:
 Focus on functional behavior. Use acceptance criteria and comments if available.
 Scenarios must be realistic for manual QA execution.`
 
-    const userPrompt = `Team: ${teamKey}
+    const buildUserPrompt = (trim: boolean) => {
+      const ticketDescription = jiraDetails.description || 'No description provided'
+      const ticketComments = jiraDetails.comments || 'None'
+      return `Team: ${teamKey}
 Theme: ${theme}
 Target ticket:
 - ID: ${jiraDetails.id}
 - Title: ${jiraDetails.summary}
-- Description: ${jiraDetails.description || 'No description provided'}
-- Comments: ${jiraDetails.comments || 'None'}
+- Description: ${trim ? clipText(ticketDescription, 2000) : ticketDescription}
+- Comments: ${trim ? clipText(ticketComments, 2000) : ticketComments}
 
 Historical test cases:
 ${historyContext || 'None'}
 
 Historical tickets:
-${sourceContext || 'None'}
+${trim ? clipText(buildSourceContext(true), 12000) : sourceContext || 'None'}
 
 Documentation context:
-${docsContext || 'None'}
+${trim ? clipText(buildDocsContext(true), 6000) : docsContext || 'None'}
 `
+    }
+
+    const userPrompt = buildUserPrompt(false)
 
     const aiConfig = {
       apiKey: user.openaiApiKey || undefined,
-      model: user.openaiModel || undefined,
+      model: model || user.openaiModel || undefined,
       baseUrl: adminSettings?.aiBaseUrl || null,
       maxTokens:
         typeof adminSettings?.aiMaxTokens === 'number' && Number.isFinite(adminSettings.aiMaxTokens)
@@ -262,16 +288,52 @@ ${docsContext || 'None'}
           : undefined,
     }
 
-    const raw = await generateJsonWithOpenAI({
-      system: systemPrompt,
-      user: userPrompt,
-      strictJson: true,
-      temperature: 0.2,
-      apiKey: aiConfig.apiKey,
-      model: aiConfig.model,
-      baseUrl: aiConfig.baseUrl,
-      maxTokens: aiConfig.maxTokens,
-    })
+    let raw: string
+    let usedCondensedContext = false
+    try {
+      raw = await generateJsonWithOpenAI({
+        system: systemPrompt,
+        user: userPrompt,
+        strictJson: true,
+        temperature: 0.2,
+        apiKey: aiConfig.apiKey,
+        model: aiConfig.model,
+        baseUrl: aiConfig.baseUrl,
+        maxTokens: aiConfig.maxTokens,
+      })
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : ''
+      const isTimeout =
+        message.includes('deadline') ||
+        message.includes('timed out') ||
+        message.includes('Request cancelled') ||
+        message.includes('AbortError')
+      if (!isTimeout) {
+        throw error
+      }
+      usedCondensedContext = true
+      // Build minimal prompt for retry - only essential info
+      const minimalUserPrompt = `Team: ${teamKey}
+Theme: ${theme}
+Target ticket:
+- ID: ${jiraDetails.id}
+- Title: ${jiraDetails.summary}
+- Description: ${clipTextMini(jiraDetails.description || '', 800)}
+- Comments: ${clipTextMini(jiraDetails.comments || '', 400)}
+
+Historical context: ${historyContext ? clipTextMini(historyContext, 1500) : 'None'}
+`
+      raw = await generateJsonWithOpenAI({
+        system: systemPrompt,
+        user: minimalUserPrompt,
+        strictJson: true,
+        temperature: 0.2,
+        apiKey: aiConfig.apiKey,
+        model: aiConfig.model,
+        baseUrl: aiConfig.baseUrl,
+        maxTokens: aiConfig.maxTokens,
+      })
+    }
 
     let parsed: any
     try {
@@ -305,6 +367,9 @@ ${docsContext || 'None'}
         prerequisites: normalizeString(parsed?.prerequisites) || 'Define prerequisites.',
         objective: normalizeString(parsed?.objective) || `Validate ${theme}`,
         scenarios,
+      },
+      meta: {
+        usedCondensedContext,
       },
     })
   } catch (error) {
